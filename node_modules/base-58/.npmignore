@@ -1,0 +1,5 @@
+node_modules
+Base58_Test.js
+Base58.*.test.js
+window.js
+window_test_harness.js
