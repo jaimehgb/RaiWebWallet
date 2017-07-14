@@ -1,89 +1,89 @@
 // general functions
 
 function stringFromHex(hex) {
-    var hex = hex.toString();//force conversion
-    var str = '';
-    for (var i = 0; i < hex.length; i += 2)
-        str += String.fromCharCode(parseInt(hex.substr(i, 2), 16));
-    return str;
+	var hex = hex.toString();//force conversion
+	var str = '';
+	for (var i = 0; i < hex.length; i += 2)
+		str += String.fromCharCode(parseInt(hex.substr(i, 2), 16));
+	return str;
 }
 
 function stringToHex(str) {
-    var hex = '';
-    for(var i=0;i<str.length;i++) {
-        hex += ''+str.charCodeAt(i).toString(16);
-    }
-    return hex;
+	var hex = '';
+	for(var i=0;i<str.length;i++) {
+		hex += ''+str.charCodeAt(i).toString(16);
+	}
+	return hex;
 }
 
 function accountFromHexKey (hex)
 {
-    var checksum = '';
-    var key_bytes = uint4_uint8( hex_uint4 (hex) );
-    var checksum = uint5_string( uint4_uint5( uint8_uint4( blake2b(key_bytes, null, 5).reverse() ) ) );
-    var c_account = uint5_string( uint4_uint5( hex_uint4 ('0'+hex) ) );
-    return 'xrb_'+ c_account + checksum;
-    
+	var checksum = '';
+	var key_bytes = uint4_uint8( hex_uint4 (hex) );
+	var checksum = uint5_string( uint4_uint5( uint8_uint4( blake2b(key_bytes, null, 5).reverse() ) ) );
+	var c_account = uint5_string( uint4_uint5( hex_uint4 ('0'+hex) ) );
+	return 'xrb_'+ c_account + checksum;
+	
 }
 
 
 function dec2hex(str, bytes = null)
 {
-    var dec = str.toString().split(''), sum = [], hex = [], i, s
-    while(dec.length)
-    {
-        s = 1 * dec.shift()
-        for(i = 0; s || i < sum.length; i++)
-        {
-            s += (sum[i] || 0) * 10
-            sum[i] = s % 16
-            s = (s - sum[i]) / 16
-        }
-    }
-    while(sum.length)
-    {
-        hex.push(sum.pop().toString(16));
-    }
-    
-    hex = hex.join('');
-    
-    if(hex.length % 2 != 0)
-        hex = "0" + hex;
-        
-    if(bytes > hex.length / 2)
-    {
-        var diff = bytes - hex.length / 2;
-        for(var i = 0; i < diff; i++)
-            hex = "00" + hex;
-    }
-    
-    return hex;
+	var dec = str.toString().split(''), sum = [], hex = [], i, s
+	while(dec.length)
+	{
+		s = 1 * dec.shift()
+		for(i = 0; s || i < sum.length; i++)
+		{
+			s += (sum[i] || 0) * 10
+			sum[i] = s % 16
+			s = (s - sum[i]) / 16
+		}
+	}
+	while(sum.length)
+	{
+		hex.push(sum.pop().toString(16));
+	}
+	
+	hex = hex.join('');
+	
+	if(hex.length % 2 != 0)
+		hex = "0" + hex;
+		
+	if(bytes > hex.length / 2)
+	{
+		var diff = bytes - hex.length / 2;
+		for(var i = 0; i < diff; i++)
+			hex = "00" + hex;
+	}
+	
+	return hex;
 }
 
 function hex2dec(s) {
 
-    function add(x, y) {
-        var c = 0, r = [];
-        var x = x.split('').map(Number);
-        var y = y.split('').map(Number);
-        while(x.length || y.length) {
-            var s = (x.pop() || 0) + (y.pop() || 0) + c;
-            r.unshift(s < 10 ? s : s - 10); 
-            c = s < 10 ? 0 : 1;
-        }
-        if(c) r.unshift(c);
-        return r.join('');
-    }
+	function add(x, y) {
+		var c = 0, r = [];
+		var x = x.split('').map(Number);
+		var y = y.split('').map(Number);
+		while(x.length || y.length) {
+			var s = (x.pop() || 0) + (y.pop() || 0) + c;
+			r.unshift(s < 10 ? s : s - 10); 
+			c = s < 10 ? 0 : 1;
+		}
+		if(c) r.unshift(c);
+		return r.join('');
+	}
 
-    var dec = '0';
-    s.split('').forEach(function(chr) {
-        var n = parseInt(chr, 16);
-        for(var t = 8; t; t >>= 1) {
-            dec = add(dec, dec);
-            if(n & t) dec = add(dec, '1');
-        }
-    });
-    return dec;
+	var dec = '0';
+	s.split('').forEach(function(chr) {
+		var n = parseInt(chr, 16);
+		for(var t = 8; t; t >>= 1) {
+			dec = add(dec, dec);
+			if(n & t) dec = add(dec, '1');
+		}
+	});
+	return dec;
 }
 
 
@@ -194,10 +194,10 @@ function hex_uint8 (hex) {
 
 function hex_uint4 (hex)
 {
-    var length = hex.length;
-    var uint4 = new Uint8Array(length);
-    for (let i = 0; i < length; i++) uint4[i] = parseInt(hex.substr(i, 1), 16);
-    return uint4;
+	var length = hex.length;
+	var uint4 = new Uint8Array(length);
+	for (let i = 0; i < length; i++) uint4[i] = parseInt(hex.substr(i, 1), 16);
+	return uint4;
 }
 
 
@@ -205,18 +205,18 @@ function uint8_hex (uint8) {
 	var hex = "";
 	for (let i = 0; i < uint8.length; i++)
 	{
-	    aux = uint8[i].toString(16).toUpperCase();
-	    if(aux.length == 1)
-	        aux = '0'+aux;
-	    hex += aux;
-	    aux = '';
+		aux = uint8[i].toString(16).toUpperCase();
+		if(aux.length == 1)
+			aux = '0'+aux;
+		hex += aux;
+		aux = '';
 	}
 	return(hex);
 }
 
 function uint4_hex (uint4)
 {
-    var hex = "";
+	var hex = "";
 	for (let i = 0; i < uint4.length; i++) hex += uint4[i].toString(16).toUpperCase();
 	return(hex);   
 }
@@ -233,7 +233,7 @@ function array_crop (array) {
 	var length = array.length - 1;
 	var cropped_array = new Uint8Array(length);
 	for (let i = 0; i < length; i++)
-	    cropped_array[i] = array[i+1];
+		cropped_array[i] = array[i+1];
 	return cropped_array;
 }
 
@@ -252,10 +252,10 @@ function keyFromAccount(account)
 				return key;
 			}
 			else
-			    throw "Checksum incorrect.";
+				throw "Checksum incorrect.";
 		}
 		else
-		    throw "Invalid XRB account.";
+			throw "Invalid XRB account.";
 	}
 	throw "Invalid XRB account.";
 }
