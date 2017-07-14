@@ -5,6 +5,7 @@ var lastRetrieved = 0;
 var recentEmpty = true;
 var lastWorkRetrieved = 0;
 var waitingForSingleWork = false;
+var logger = new Logger(true);
 
 $(document).ready(function(){
     
@@ -55,12 +56,46 @@ $(document).ready(function(){
             loader: false
         })
     }
+	
+	function alertWarning(msg)
+    {
+        $.toast({
+            text: msg,
+            icon: 'warning',
+            position: 'bottom-right',
+            hideAfter: 10000,
+            loader: false
+        })
+    }
+	
+	$('#refreshdebug').click(function(){
+		var logs = logger.getLogs();
+
+		$('#debug-box').html('');
+		$('#ready-blocks').html('');
+		$('#pending-blocks').html('');
+		
+		for(let i in logs)
+			$('#debug-box').append(logs[i]+'<br/>');
+		for(let i in logger.getWarnings())
+			$('#debug-box').append(logger.getWarnings()[i]+'<br/>');
+		for(let i in logger.getErrors())
+			$('#debug-box').append(logger.getErrors()[i]+'<br/>');
+		
+		var pendingblks = wallet.getPendingBlocks();
+		for(let i in pendingblks)
+			$('#pending-blocks').append(pendingblks[i].getJSONBlock());
+		
+		var readyblks = wallet.getReadyBlocks();
+		for(let i in pendingblks)
+			$('#ready-blocks').append(readyblks[i].getJSONBlock());
+	});
     
     function addAccountToGUI(accountObj)
     {
         $('.accounts ul').append('<li><div class="row"><div class="col-xs-12"><span>'+accountObj.account+'</span></div></div></li>');
-        $('#send-select').append('<option>'+accountObj.account+' <span>('+(accountObj.balance / 1000000).toFixed(8)+' XRB)</span></option>');
-        $('#receive-select').append('<option>'+accountObj.account+' <span>('+(accountObj.balance / 1000000).toFixed(8)+' XRB)</span></option>');
+        $('#send-select').append('<option>'+accountObj.account+' <span id="sendbalance_'+accountObj.account+'">('+(accountObj.balance / 1000000).toFixed(8)+' XRB)</span></option>');
+        $('#receive-select').append('<option>'+accountObj.account+' <span id="receivebalance_'+accountObj.account+'>('+(accountObj.balance / 1000000).toFixed(8)+' XRB)</span></option>');
         $('#change-select').append('<option>'+accountObj.account+'</option>');
             //var selected = $('#change-select').val();
             //var repr = wallet.getRepresentative(selected);
@@ -186,6 +221,19 @@ $(document).ready(function(){
         var blocks = wallet.getNonBroadcastedBlocks();
         // TODO
     }
+	
+	function recheckWork()
+	{
+		var pool = wallet.getWorkPool();
+		for(let i in pool)
+		{
+			if(!pool[i].requested || pool[i].needed)
+			{
+				remoteWork(pool[i].hash);
+			}
+		}
+		setTimeout(recheckWork, 5000);
+	}
     
     function broadcastBlock(blk)
     {
@@ -197,6 +245,7 @@ $(document).ready(function(){
             guiHash = blk.getSource();
         else
             guiHash = blk.getHash(true);
+		
         $.post('ajax.php', 'action=broadcast&hash='+hash+"&data="+json, function(data){
             data = JSON.parse(data);
             if(data.status == 'success')
@@ -206,6 +255,7 @@ $(document).ready(function(){
                 console.log('Block broadcasted to network: '+hash);
 				alertInfo(blk.getType()+" block broadcasted to network.");
                 sync(wallet.pack());
+				updateAccountGUI(blk.getAccount());
             }
             else
             {
@@ -217,6 +267,26 @@ $(document).ready(function(){
 	function rebroadcastBlock(blockHash)
 	{
 		wallet.addBlockToReadyBlocks(wallet.getBlockFromHash(blockHash));
+	}
+	
+	function updateAccountGUI(acc)
+	{
+		refreshChain();
+		
+		// update account balance on send and receive modals
+		var balance = wallet.getAccountBalance(acc);
+		$('#sendbalance_'+acc).html(balance);
+		$('#receivebalance_'+acc).html(balance);
+	}
+	
+	function refreshChain()
+	{
+		var selected = $('#acc-select').val();
+        var last = wallet.getLastNBlocks(selected, 20);
+        clearBlocksFromGui();
+        
+        for(let i in last)
+            addBlockToGui(last[i]);
 	}
     
     function updateReceiveQr(account = null)
@@ -259,7 +329,10 @@ $(document).ready(function(){
             if(data.status == 'success')
             {
                 console.log('Work requested for block ' + hash);
-                wallet.workPoolAdd(hash, acc);
+				if(data.work != false)
+					wallet.updateWorkPool(hash, data.work);
+				else
+	                wallet.setWorkRequested(hash);
             }
         });
     }
@@ -283,6 +356,7 @@ $(document).ready(function(){
         setTimeout(getReadyWork, 3000);
     }
     
+	
     function syncWorkPool()
     {
         var pool = wallet.getWorkPool();
@@ -295,6 +369,7 @@ $(document).ready(function(){
         }
       setTimeout(syncWorkPool, 5000);
     }
+	
     
     function getSingleWork(hash, acc)
     {
@@ -396,9 +471,10 @@ $(document).ready(function(){
         refreshBalances();
         getPendingBlocks();
         getWalletTxs();
-        getReadyWork();
-        syncWorkPool();
+        //getReadyWork();
+		recheckWork();
         checkReadyBlocks();  
+		//syncWorkPool();
 		var selected = $('#acc-select').val();
         var last = wallet.getLastNBlocks(selected, 20);
         clearBlocksFromGui();
@@ -429,6 +505,7 @@ $(document).ready(function(){
         {
             // create wallet and send to server
             wallet = new RaiWallet($('#psw').val());
+			wallet.setLogger(logger);
             var seed = wallet.createWallet();
             var pack = wallet.pack();
             var email = $('#email').val();
@@ -472,6 +549,7 @@ $(document).ready(function(){
             {
                 // decrypt wallet and check checksum
                 wallet = new RaiWallet($('#password').val());
+				wallet.setLogger(logger);
                 $('#password').val('');
                 
                 try{
@@ -538,11 +616,14 @@ $(document).ready(function(){
         if(!error)
         {
             try{
-                var hash = wallet.addPendingSendBlock(from, to, amountRai);
+                var blk = wallet.addPendingSendBlock(from, to, amountRai);
+				var hash = blk.getHash(true);
+				
                 refreshBalances();
                 $(".modal").modal('hide');
                 alertInfo("Transaction built successfully. Waiting for work ...");
 				addRecentSendToGui({date: "Just now", amount: amountRai, hash: hash});
+				remoteWork(blk.getPrevious(), blk.getAccount());
             }catch(e){
                 alertError('Ooops, something happened: ' + e.message);
             }
@@ -596,17 +677,11 @@ $(document).ready(function(){
         var selected = $('#change-select').val();
         var repr = wallet.getRepresentative(selected);
         $('#acc-repr').val(repr);
-        console.log(repr);
     });
     
     
     $('#acc-select').change(function(){
-        var selected = $('#acc-select').val();
-        var last = wallet.getLastNBlocks(selected, 20);
-        clearBlocksFromGui();
-        
-        for(let i in last)
-            addBlockToGui(last[i]);
+        refreshChain();
     });
 	
 	$('#refresh').click(function(){
@@ -650,7 +725,7 @@ $(document).ready(function(){
 							'<button type="button" data-toggle="tooltip" data-placement="right" title="Rebroadcast" class="btn btn-default gborder rebroadcast" id="rebroadcast_'+block.getHash(true)+'" ><i class="fa fa-paper-plane-o" aria-hidden="true"></i></button>'+
 						'</div>'+
 						'<div class="col-sm-12" style="display:none; margin-top:15px" id="json_'+block.getHash(true)+'">'+
-							'<pre>'+block.getJSONBlock()+'</pre>'+
+							'<pre><code>'+block.getJSONBlock(true)+'</code></pre>'+
 						'</div>'+
 					'</div>'+
 					/*
@@ -685,7 +760,7 @@ $(document).ready(function(){
 							'<button type="button" data-toggle="tooltip" data-placement="right" title="Rebroadcast" class="btn btn-default gborder rebroadcast" id="rebroadcast_'+block.getHash(true)+'" ><i class="fa fa-paper-plane-o" aria-hidden="true"></i></button>'+
 						'</div>'+	
 						'<div class="col-sm-12" style="display:none; margin-top:15px" id="json_'+block.getHash(true)+'">'+
-							'<pre>'+block.getJSONBlock()+'</pre>'+
+							'<pre><code>'+block.getJSONBlock(true)+'</code></pre>'+
 						'</div>'+
 					'</div>'+
 				'</li>'
@@ -711,6 +786,36 @@ $(document).ready(function(){
 		}catch(e){
 			alertError('Incorrect password');
 		}
+	});
+	
+	$('#change-pass').click(function(){
+		var old = $('#change-pass-current').val();
+		var new1 = $('#change-pass-new1').val();
+		var new2 = $('#change-pass-new2').val();
+		
+		if(new1 != new2)
+		{
+			alertError('Passwords do not match.');
+			return;
+		}
+		
+		if(new1.length < 8)
+		{
+			alertWarning("Use a safer password OMG");
+			return;
+		}
+		
+		try{
+			wallet.changePass(old, new1);
+			sync(wallet.pack());
+			alertSuccess('Password successfully changed.');
+			old = $('#change-pass-current').val('');
+			new1 = $('#change-pass-new1').val('');
+			new2 = $('#change-pass-new2').val('');
+		}catch(e){
+			alertError(e);
+		}
+		
 	});
 	
 	$('#download_wallet').click(function(){

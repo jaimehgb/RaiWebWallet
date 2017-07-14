@@ -21,6 +21,9 @@
                     <a href="#" id="gsecurity"><i class="fa fa-lock" aria-hidden="true" style="display:inline"></i> Security</a>
                 </li>
                 <li>
+                    <a href="#" id="gdebug"><i class="fa fa-bug" aria-hidden="true" style="display:inline"></i> Debug</a>
+                </li>
+                <li>
                     <a href="/" id="gout"><i class="fa fa-sign-out" aria-hidden="true" style="display:inline"></i> Sign Out</a>
                 </li>
             </ul>
@@ -138,6 +141,34 @@
                     </div>
                     <div class="col-md-12 b-line">
                         <div class="col-md-12">
+                            <h3>Change Password</h3>
+                            <p>
+                                You can change you wallet password here. Just make sure you don't forget it! 
+                            </p>
+                            <form method="post">
+                                <div class="form-group">
+                                    <label>Current Password</label>
+                                    <input type="password" name="current" id="change-pass-current" class="form-control"/>
+                                </div>
+                                <hr/>
+                                <div class="form-group">
+                                    <label>New Password</label>
+                                    <input type="password" name="new1" id="change-pass-new1" class="form-control" />
+                                </div>
+                                <div class="form-group">
+                                    <label>Enter the new password again</label>
+                                    <input type="password" name="new2" id="change-pass-new2" class="form-control" />
+                                </div>
+                                <div class="form-group">
+                                    <button type="button" class="btn btn-primary" id="change-pass">
+                                        Change
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                    <div class="col-md-12 b-line">
+                        <div class="col-md-12">
                             <h3>Download Wallet Data</h3>
                             <p>
                                 Just in case, you can also download your wallet data ciphered. Having the seed is far more efficient, 
@@ -152,6 +183,33 @@
                                     </button>
                                 </div>
                             </form>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Debug -->
+                <div class="row debug" style="display:none">
+                    <div class="col-md-12">
+                        <div class="col-md-12">
+                            <h3>Logs</h3>
+                            <pre id="debug-box">
+                            
+                            </pre>
+                            <h4>
+                                Pending Blocks
+                            </h4>
+                            <pre id="pending-blocks">
+                            
+                            </pre>
+                            <h4>
+                                Ready Blocks
+                            </h4>
+                            <pre id="ready-blocks">
+                            
+                            </pre>
+                            <button type="button" class="btn btn-primary" id="refreshdebug">
+                                Refresh
+                            </button>
                         </div>
                     </div>
                 </div>

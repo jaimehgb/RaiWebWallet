@@ -227,6 +227,21 @@ session_start();
             }
         });
         
+        $('#gdebug').click(function(event){
+            event.preventDefault();
+            if(active != 'debug')
+            {
+                $('.sidebar-nav .active').removeClass('active');
+                $('#gdebug').parent().addClass('active');
+                $('.current').fadeOut(500, function(){
+                    $('.current').removeClass('current');
+                    $('.debug').fadeIn();
+                    $('.debug').addClass('current');
+                    active = 'debug';
+                });
+            }
+        });
+        
         $(function () {
           $('[data-toggle="tooltip"]').tooltip()
         })  
@@ -245,6 +260,7 @@ session_start();
     <script src="blake2b.js"></script>
     <script src="node_modules/tweetnacl/nacl.js"></script>
     <script type="text/javascript" src="functions.js"></script>
+    <script type="text/javascript" src="Logger.js"></script>
     <script src="main.js"></script>
 
 </body>

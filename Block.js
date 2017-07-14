@@ -128,7 +128,6 @@ module.exports = function()
         decBalance = balanceRemaining;
         balance = dec2hex(balanceRemaining + RAI_TO_RAW, 16);
         type = 'send';
-        
     }
     
     /**
@@ -296,7 +295,12 @@ module.exports = function()
     api.getBalance = function(format = 'dec')
     {
         if(format == 'dec')
-            return parseInt(hex2dec(balance).slice(0, -24));
+        {
+            var dec = parseInt(hex2dec(balance).slice(0, -24));
+            if(isNaN(dec))
+                dec = 0;
+            return dec;
+        }
         return balance;
     }
     
@@ -376,7 +380,7 @@ module.exports = function()
      * 
      * @returns {string} The block JSON encoded to be broadcasted with RPC
      */
-    api.getJSONBlock = function()
+    api.getJSONBlock = function(pretty = false)
     {
         if(!signed)
             throw "Block lacks signature";
@@ -414,6 +418,8 @@ module.exports = function()
         obj.work = work;
         obj.signature = signature;
         
+        if(pretty)
+            return JSON.stringify(obj, null, 2);
         return JSON.stringify(obj);
     }
     

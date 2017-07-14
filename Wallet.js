@@ -157,11 +157,13 @@ module.exports = function(password)
     var passPhrase = password;          // wallet password
     var iterations = 5000;              // pbkdf2 iterations
     var checksum;                       // wallet checksum 
+	var ciphered = true;
+	
+	var logger = new Logger();
  
     api.debug = function()
     {
-        api.debugChain();
-        console.log(chain);
+        console.log(readyBlocks);
     }
     
     api.debugChain = function()
@@ -173,6 +175,11 @@ module.exports = function(password)
 			console.log(chain[i].getPrevious());
         }
     }
+	
+	api.setLogger = function(loggerObj)
+	{
+		logger = loggerObj;
+	}
     
     /**
      * Sets the secret key to do all the signing stuff
@@ -200,6 +207,19 @@ module.exports = function(password)
         return nacl.sign.detached(message, sk);
     }
     
+	api.changePass = function(pswd, newPass)
+	{
+		if(ciphered)
+			throw "Wallet needs to be decrypted first.";
+		if(pswd == passPhrase)
+		{
+			passPhrase = newPass;
+			logger.log("Password changed");
+		}
+		else
+			throw "Incorrect password.";
+	}
+	
     /**
      * Sets a seed for the wallet
      * 
@@ -253,8 +273,10 @@ module.exports = function(password)
         var newKey = blake2bFinal(context);
         
         lastKeyFromSeed++;
-        
+		
+		logger.log("New key generated");
         api.addSecretKey(uint8_hex(newKey));
+		
         return accountFromHexKey(uint8_hex(nacl.sign.keyPair.fromSecretKey(newKey).publicKey));
     }
     
@@ -287,6 +309,8 @@ module.exports = function(password)
 				representative: ""
             }
         );
+		logger.log("New key added to wallet.");
+		console.log(keys);
     }
     
     /**
@@ -354,12 +378,12 @@ module.exports = function(password)
         // save current account status
         if(current != -1)
         {
-            keys[current].balance = balance;
-            keys[current].pendingBalance = pendingBalance;
-            keys[current].lastBlock = lastBlock;
-          	keys[current].lastPendingBlock = lastPendingBlock;
-            keys[current].chain = chain;
-            keys[current].pendingBlocks = pendingBlocks;
+        	keys[current].balance = balance;
+        	keys[current].pendingBalance = pendingBalance;
+        	keys[current].lastBlock = lastBlock;
+        	keys[current].lastPendingBlock = lastPendingBlock;
+        	keys[current].chain = chain;
+        	keys[current].pendingBlocks = pendingBlocks;
 			keys[current].representative = representative;
         }
         
@@ -432,6 +456,8 @@ module.exports = function(password)
         
         block.setSignature(uint8_hex(api.sign(blockHash)));
         block.setAccount(keys[current].account);
+		
+		logger.log("Block " + block.getHash(true) + " signed.");
     }
     
     /**
@@ -472,7 +498,15 @@ module.exports = function(password)
      */
     api.getPendingBalance = function()
     {
-        return pendingBalance ? pendingBalance : keys[current].pendingBalance;
+        //return pendingBalance ? pendingBalance : keys[current].pendingBalance;
+		var am = 0;
+		for(let i in pendingBlocks)
+		{
+			if(pendingBlocks[i].getType() == 'open' || pendingBlocks[i].getType() == 'receive')
+				if(!isNaN(pendingBlocks[i].getAmount()))
+					am += pendingBlocks[i].getAmount();
+		}
+		return am;
     }
 	
 	api.getRepresentative = function(acc = false)
@@ -517,7 +551,8 @@ module.exports = function(password)
         var pending = 0;
         for(let i in walletPendingBlocks)
         {
-            pending += parseInt(walletPendingBlocks[i].getAmount());
+			if(walletPendingBlocks[i].getType() == 'open' || walletPendingBlocks[i].getType() == 'receive')
+            	pending += parseInt(walletPendingBlocks[i].getAmount());
         }
         return pending;
     }
@@ -547,7 +582,7 @@ module.exports = function(password)
 		for(let i in keys)
 		{
 			api.useAccount(keys[i].account);
-			private.setBalance(api.getAccountBalance(keys[i].account));
+			private.setBalance(api.getBalanceUpToBlock(0));
 		}
 	}
 	
@@ -557,7 +592,7 @@ module.exports = function(password)
             return 0;
         
         var sum = 0;
-        var found = false;
+        var found = blockHash === 0 ? true : false;
 		var blk;
 		
 		if(blockHash === 0)
@@ -704,6 +739,7 @@ module.exports = function(password)
 	api.addBlockToReadyBlocks = function(blk)
 	{
 		readyBlocks.push(blk);
+		logger.log("Block ready to be broadcasted: " +blk.getHash(true));
 	}
     
     api.addPendingSendBlock = function(from, to, amount = 0)
@@ -711,8 +747,7 @@ module.exports = function(password)
 		api.useAccount(from);
 		
 		var bal = api.getBalanceUpToBlock(0);
-		var remaining = bal - parseInt(amount);
-		console.log(remaining);
+		var remaining = parseInt(bal) - parseInt(amount);
 		var blk = new Block();
 		
 		blk.setSendParameters(lastPendingBlock, to, remaining);
@@ -734,15 +769,21 @@ module.exports = function(password)
         {
             if(remoteWork[i].hash == blk.getPrevious())
             {
-                api.updateWorkPool(blk.getHash(true), remoteWork[i].work);
-                worked = true;
-                break;
+				if(remoteWork[i].worked)
+				{
+	                api.updateWorkPool(blk.getHash(true), remoteWork[i].work);
+                	worked = true;
+                	break;
+				}
             }
         }
         if(!worked)
-            api.workPoolAdd(blk.getPrevious(), from);
+            api.workPoolAdd(blk.getPrevious(), from, true);
         api.workPoolAdd(blk.getHash(true), from);
-		return blk.getHash(true);
+		
+		logger.log("New send block waiting for work: " + blk.getHash(true));
+		
+		return blk;
 
 	}
     
@@ -793,15 +834,21 @@ module.exports = function(password)
         {
             if(remoteWork[i].hash == blk.getPrevious())
             {
-                api.updateWorkPool(blk.getHash(true), remoteWork[i].work);
-                worked = true;
-                break;
+				if(remoteWork[i].worked)
+				{
+	                api.updateWorkPool(blk.getHash(true), remoteWork[i].work);
+                	worked = true;
+                	break;
+				}
             }
         }
         if(!worked)
-            api.workPoolAdd(blk.getPrevious(), acc);
+            api.workPoolAdd(blk.getPrevious(), acc, true);
         api.workPoolAdd(blk.getHash(true), acc);
-		return blk.getHash(true);
+		
+		logger.log("New receive block waiting for work: " + blk.getHash(true));
+		
+		return blk;
     }
 	
 	api.addPendingChangeBlock = function(acc, repr)
@@ -829,15 +876,21 @@ module.exports = function(password)
         {
             if(remoteWork[i].hash == blk.getPrevious())
             {
-                api.updateWorkPool(blk.getHash(true), remoteWork[i].work);
-                worked = true;
-                break;
+				if(remoteWork[i].worked)
+				{
+	                api.updateWorkPool(blk.getHash(true), remoteWork[i].work);
+                	worked = true;
+                	break;
+				}
             }
         }
         if(!worked)
-            api.workPoolAdd(blk.getPrevious(), acc);
+            api.workPoolAdd(blk.getPrevious(), acc, true);
         api.workPoolAdd(blk.getHash(true), acc);
-		return blk.getHash(true);
+		
+		logger.log("New change block waiting for work: " + blk.getHash(true));
+		
+		return blk;
 	}
     
     // needs fix
@@ -910,38 +963,78 @@ module.exports = function(password)
         keys[current].lastBlock = blockHash;
     }
     
-    api.workPoolAdd = function(hash, acc)
+    api.workPoolAdd = function(hash, acc, needed = false, work = false)
     {
-		// TODO
-        // check if already there
-        remoteWork.push({hash: hash, work: "", worked: false, account: acc});
+		for(let i in remoteWork)
+			if(remoteWork[i].hash == hash)
+				return;
+		
+		if(work !== false)
+		{
+			remoteWork.push({hash: hash, worked: true, work: work, requested: true, needed: needed,  account: acc});
+		}
+		else
+		{
+        	remoteWork.push({hash: hash, work: "", worked: false, requested: false, needed: needed, account: acc});
+			logger.log("New work target: " + hash);
+		}
     }
     
     api.getWorkPool = function()
     {
         return remoteWork;
     }
-    
+	
+	api.setWorkRequested = function(hash)
+	{
+		for(let i in remoteWork)
+		{
+			if(remoteWork[i].hash == hash)
+			{
+				remoteWork[i].requested = true;
+				break;
+			}
+		}
+	}
+	
+	api.setWorkNeeded = function(hash)
+	{
+		for(let i in remoteWork)
+		{
+			if(remoteWork[i].hash == hash)
+			{
+				remoteWork[i].needed = true;
+				break;
+			}
+		}
+	}
+	
     api.updateWorkPool = function(hash, work)
     {
+		var found = false;
         for(let i in remoteWork)
         {
             if(remoteWork[i].hash == hash)
             {
                 remoteWork[i].work = work;
                 remoteWork[i].worked = true;
+				remoteWork[i].requested = true;
+				remoteWork[i].needed = false;
+				
+				found = true;
                 for(let j in walletPendingBlocks)
                 {
                     if(walletPendingBlocks[j].getPrevious() == hash)
                     {
-                        console.log("Work received for block "+walletPendingBlocks[j].getHash(true)+" previous: "+hash);
+						logger.log("Work received for block "+walletPendingBlocks[j].getHash(true)+" previous: "+hash);
                         walletPendingBlocks[j].setWork(work);
                         var aux = walletPendingBlocks[j];
                         try{
                             api.confirmBlock(aux.getHash(true));
                             remoteWork.splice(i, 1);
+							api.setWorkNeeded(aux.getHash(true));
                         }catch(e){
-                            console.log("Error adding block "+aux.getHash(true)+" to chain: " + e.message);
+							logger.error("Error adding block "+aux.getHash(true)+" to chain: " + e.message);
                             errorBlocks.push(aux)
                         }
                         break;
@@ -950,6 +1043,13 @@ module.exports = function(password)
                 break;
             }
         }
+		
+		if(!found)
+		{
+			logger.warn("Work received for missing target: " + hash);
+			// add to work pool just in case, it may be a cached from the last block
+			api.workPoolAdd(hash, "", false, work);
+		}
     }
     
     api.waitingRemoteWork = function()
@@ -962,6 +1062,11 @@ module.exports = function(password)
         return false;
     }
     
+	api.getReadyBlocks = function()
+	{
+		return readyBlocks;	
+	}
+	
     api.getNextReadyBlock = function()
     {
         if(readyBlocks.length > 0)
@@ -1035,7 +1140,14 @@ module.exports = function(password)
                         }
                         else if(blk.getType() == 'send')
                         {
-                            // do nothing actually
+                            // check if amount sent matches amount actually being sent
+							var real = api.getBalanceUpToBlock(blk.getPrevious());
+							if(real - blk.getBalance('dec') != blk.getAmount())
+							{
+								logger.error('Sending incorrect amount ('+blk.getAmount()+') (' + (real - blk.getBalance('dec') ) +')' );
+								api.recalculateWalletBalances();
+								throw "Incorrect send amount.";
+							}
                         }
                         else if(blk.getType() == 'change')
                         {
@@ -1050,14 +1162,24 @@ module.exports = function(password)
                         private.save();
                     }
                     else
+					{
+						logger.warn("Previous block does not match actual previous block");
                         throw "Previous block does not match actual previous block";
+					}
                 }
+				logger.log("Block added to chain: " + blk.getHash(true));
             }
             else
-                throw "Block lacks signature or work.";
+			{
+				logger.error("Trying to confirm block without signature or work.");
+            	throw "Block lacks signature or work.";
+			}
         }
       	else
-          throw 'Block not found';
+		{
+			logger.warn("Block trying to be confirmed has not been found.");
+	        throw 'Block not found';
+		}
     }
     
     private.save = function()
@@ -1194,9 +1316,12 @@ module.exports = function(password)
 			aux.representative = walletData.keys[i].representative != undefined ? walletData.keys[i].representative : aux.account;
             
             keys.push(aux);
+			if(lastPendingBlock.length == 64)
+				api.workPoolAdd(lastPendingBlock, aux.account, true);
         }
         api.useAccount(keys[0].account);
-		//api.recalculateWalletBalances();
+		api.recalculateWalletBalances();
+		ciphered = false;
         return walletData;
     }
     
