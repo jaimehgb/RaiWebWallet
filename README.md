@@ -11,3 +11,18 @@ BTW, currently its not stable. Still in testing phase. <br/>
 Feel free to contribute and post all the issues you find :)<br/>
 <br/>
 (Hmmm, I have to spend some time on a proper readme :P )<br/>
+
+<h3>TODO</h3>
+<hr/>
+ - Allow user to change pbkdf2 password stretching iterations (security).
+ - Allow user to set a minimum receive amount (Utility)
+ - Allow user to import a wallet seed, importing all chains in case it has been used already in the network (Utility)
+ - Allow user to import single private keys, of course not backed by the seed (Utility)
+ - Load more transactions when scrolling down the txs page, currently only the last 20 are loaded (UX)
+ - Change URI when changing tabs (UX)
+ - On page refresh, show up the login modal with the wallet id already filled so users can log back in quickly (UX)
+ - Intensive testing.
+ - Code cleaning.
+ - Client/Server comunication optimization, there are too many calls.
+ 
+ 
