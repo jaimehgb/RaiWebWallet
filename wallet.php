@@ -14,9 +14,11 @@
                 <li>
                     <a href="#" id="gtxs"><i class="fa fa-exchange" aria-hidden="true" style="display:inline"></i> Transactions</a>
                 </li>
+                <!--
                 <li>
                     <a href="#" id="gsettings"><i class="fa fa-cogs" aria-hidden="true" style="display:inline"></i> Settings</a>
                 </li>
+                -->
                 <li>
                     <a href="#" id="gsecurity"><i class="fa fa-lock" aria-hidden="true" style="display:inline"></i> Security</a>
                 </li>
@@ -37,8 +39,9 @@
                     <div class="col-md-12 b-line">
                         <div class="col-md-12 main-box">
                             <div class="row">
-                                <div class="col-xs-6">
+                                <div class="col-xs-6 buttons">
                                     <h2 style="font-weight:700">YOUR RAIBLOCKS, ANYWHERE.</h2>
+                                    <a href="#menu-toggle" class="btn btn-info" id="menu-toggle">Toggle Menu</a>
                                     <button type="button" class="btn btn-primary" id="send">Send</button>
                                     <button type="button" class="btn btn-primary" id="receive">Receive</button>
                                     <button type="button" class="btn btn-primary" id="change">Change</button>
@@ -56,7 +59,7 @@
                 <div class="row dashboard current">
                     <div class="col-md-12">
                         <div class="col-md-6">
-                            <h3>Pending Blocks</h3>
+                            <h3>Pending Blocks (Waiting for PoW ...)</h3>
                             <div class="recent">
                                 <ul>
 
@@ -298,6 +301,9 @@
                 background:#592191;
                 font-family: 'Merriweather', 'Helvetica Neue', Arial, sans-serif;
                 box-shadow:3px 3px 5px #888;
+            }
+            .buttons a, .buttons button{
+                margin-top:10px;
             }
         </style>
 

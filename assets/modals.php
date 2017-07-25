@@ -8,7 +8,7 @@
                     <h4><span class="glyphicon glyphicon-lock"></span> Sign Up</h4>
                 </div>
                 <div class="modal-body registering" style="padding:40px 50px;">
-                    <form role="form" class="form-register">
+                    <form role="form" class="form-register" method="post">
                         <div class="form-group">
                             <label for="mail">Email</label>
                             <input type="email" class="form-control" id="email" placeholder="Enter email" required>
@@ -74,7 +74,7 @@
                     <h4><span class="glyphicon glyphicon-lock"></span> Login</h4>
                 </div>
                 <div class="modal-body" style="padding:40px 50px;">
-                    <form role="form" class="form-login">
+                    <form role="form" class="form-login" method="post">
                         <div class="form-group">
                             <label for="wid">Wallet Identifier</label>
                             <input type="text" name="wallet_id" id="wid" class="form-control" placeholder="e.g.: 33f52770e537dbae2fe307bdc4ccd4de262c705e3b565f67b37754ad46f8525f" required />

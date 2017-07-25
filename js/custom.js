@@ -1,4 +1,5 @@
 var RaiWallet = require('../Wallet');
+var Block = require('../Block.js');
 var wallet;
 var registered = false;
 var lastRetrieved = 0;
@@ -6,6 +7,8 @@ var recentEmpty = true;
 var lastWorkRetrieved = 0;
 var waitingForSingleWork = false;
 var logger = new Logger(true);
+
+var RESOLVE_FORKS_BLOCK_BATCH_SIZE = 20;
 
 $(document).ready(function(){
 	
@@ -94,8 +97,8 @@ $(document).ready(function(){
 	function addAccountToGUI(accountObj)
 	{
 		$('.accounts ul').append('<li><div class="row"><div class="col-xs-12"><span>'+accountObj.account+'</span></div></div></li>');
-		$('#send-select').append('<option>'+accountObj.account+' <span id="sendbalance_'+accountObj.account+'">('+(accountObj.balance / 1000000).toFixed(8)+' XRB)</span></option>');
-		$('#receive-select').append('<option>'+accountObj.account+' <span id="receivebalance_'+accountObj.account+'>('+(accountObj.balance / 1000000).toFixed(8)+' XRB)</span></option>');
+		$('#send-select').append('<option class="acc_select_'+accountObj.account+'">'+accountObj.account+' ('+(accountObj.balance / 1000000).toFixed(8)+' XRB)</option>');
+		$('#receive-select').append('<option class="acc_select_'+accountObj.account+'">'+accountObj.account+' ('+(accountObj.balance / 1000000).toFixed(8)+' XRB)</option>');
 		$('#change-select').append('<option>'+accountObj.account+'</option>');
 			//var selected = $('#change-select').val();
 			//var repr = wallet.getRepresentative(selected);
@@ -187,6 +190,15 @@ $(document).ready(function(){
 		
 		$('#pending').html((pending / 1000000).toFixed(6));
 		$('#balance').html((balance / 1000000).toFixed(6));
+		
+		var accs = wallet.getAccounts();
+		for(let i in accs)
+		{
+			var acc = accs[i].account;
+			var bal = accs[i].balance;
+			
+			$('select').find('.acc_select_'+acc).html(acc+' ('+(bal / 1000000).toFixed(6)+' XRB)');
+		}
 	}
 	
 	function sync(walletCipher)
@@ -309,7 +321,8 @@ $(document).ready(function(){
 				{
 					var blk = data.data[i];
 					var acc = blk.block.destination;
-					wallet.addPendingReceiveBlock(blk.hash, acc, blk.amount);
+					var from = blk.from;
+					wallet.addPendingReceiveBlock(blk.hash, acc, from, blk.amount);
 					
 					var txObj = {account: acc, amount: blk.amount, date: blk.time, hash: blk.hash}
 					addRecentRecToGui(txObj);
@@ -437,6 +450,149 @@ $(document).ready(function(){
 		setTimeout(checkReadyBlocks, 5000);
 	}
 	
+	function checkChains(callback)
+	{
+		var accs = wallet.getAccounts();
+		var lastHashes = {};
+		var forks = [];
+		for(let i in accs)
+		{
+			let blk = wallet.getLastNBlocks(accs[i].account, 1);
+			if(blk.length == 0)
+				continue;
+			lastHashes[accs[i].account] = blk[0].getHash(true);
+		}
+		lastHashes = JSON.stringify(lastHashes);
+		$.post('ajax.php', 'action=checkChains&hashes='+lastHashes, function(data){
+			data = JSON.parse(data);
+			if(data.status == 'success')
+			{
+				if(data.unsynced.length > 0)
+				{
+					for(let i in data.unsynced)
+					{
+						var acc = data.unsynced[i].account;
+						if(!data.unsynced[i].forked)
+						{
+							// not forked, but there are new blocks
+							for(let j in data.unsynced[i].blocks)
+							{
+								if(j == 0)
+									continue; // first block is already confirmed
+								var blk = new Block();
+								blk.buildFromJSON(data.unsynced[i].blocks[j].block); 
+								if(blk.getType() == 'receive' || blk.getType() == 'open')
+									blk.setOrigin(data.unsynced[i].blocks[j].fromto);
+								blk.setImmutable(true);
+								try{
+									wallet.importBlock(blk, acc);
+								}catch(e){
+									logger.error(e);
+								}
+							}
+						}
+						else
+						{
+							// our chain is different than the one the network has
+							forks.push(acc);
+						}
+					}
+					
+					if(forks.length > 0)
+					{
+						resolveForks(forks, callback);
+						return; // transfer callback to resolveForks (async function)
+								// we dont want the wallet to be opened with an invalid chain
+					}
+				}
+			}
+			else
+				logger.warn('Unable check if chain is synced with network.');
+			callback();
+		});
+	}
+	
+	/* 
+	 * Basically posts local chain block hashes until server (node) returns a common one 
+	 */
+	function resolveForks(forks, callbackFunction)
+	{
+		var evaluating = 0;
+		var resolve = function(acc, offset)
+		{
+			logger.log('Resolving fork for account: ' + acc);
+			
+			var blocks = wallet.getLastNBlocks(acc, RESOLVE_FORKS_BLOCK_BATCH_SIZE, offset);
+			var payload = [];
+			for(let i in blocks)
+				payload.push(blocks[i].getHash(true));
+			
+			$.post('ajax.php', 'action=accountContains&blocks='+JSON.stringify(payload), function(data){
+				data = JSON.parse(data);
+				if(data.status == 'success')
+				{
+					if(data.forked)
+					{
+						var blk = new Block();
+						blk.buildFromJSON(data.successors[1].block);
+						try{
+							if(wallet.importForkedBlock(blk, acc))
+							{
+								for(let i = 2; i < data.successors.length - 1; i++)
+								{
+									var blk = new Block();
+									blk.buildFromJSON(data.successors[i].block);
+									wallet.importBlock(blk, acc);
+								}
+							}
+							else
+								logger.warn('Trying to fix a fork not found :P');
+							
+							// jump to next account or callback function
+							if(evaluating >= forks.length - 1)
+								callbackFunction();
+							else
+							{
+								evaluating++;
+								resolve(forks[evaluating], 0);
+							}
+							
+						}catch(e){
+							logger.error(e);
+						}
+					}
+					else
+					{
+						// look for the fork deeper
+						if(wallet.getAccountBlockCount(acc) > offset)
+							resolve(acc, offset + RESOLVE_FORKS_BLOCK_BATCH_SIZE);
+						else
+						{
+							logger.warn('Reached chain root without finding the fork searched: ' + acc);
+							
+							// jump to next account or callback function
+							if(evaluating >= forks.length - 1)
+								callbackFunction();
+							else
+							{
+								evaluating++;
+								resolve(forks[evaluating], 0);
+							}
+						}
+					}
+				}
+				else
+				{
+					// try again ...
+					setTimeout(function(){
+						resolve(acc, offset);
+					}, 500)
+				}
+			});
+		}
+		
+		resolve(forks[evaluating], 0);
+	}
 	
 	function debugAllWallet()
 	{
@@ -458,34 +614,26 @@ $(document).ready(function(){
 			addAccountToGUI(accounts[i]);
 		}
 
-		var recent = wallet.getRecentTxs();
-		if(recent)
-		{
-			for(let i in recent)
-				addRecentRecToGui(recent[i]);
-		}
-		else
-			emptyRecent();
-		
-		//debugAllWallet();
-		refreshBalances();
-		getPendingBlocks();
-		getWalletTxs();
-		//getReadyWork();
-		recheckWork();
-		checkReadyBlocks();  
-		//syncWorkPool();
-		var selected = $('#acc-select').val();
-		var last = wallet.getLastNBlocks(selected, 20);
-		clearBlocksFromGui();
-		
-		for(let i in last)
-			addBlockToGui(last[i]);
-		
-		
-		setTimeout(function(){
-			$('.landing').fadeOut(500, function(){$('.landing').remove(); $('.wallet-wrapper').fadeIn();});
-		}, 2500);
+		checkChains(function(){
+			refreshBalances();
+			getPendingBlocks();
+			getWalletTxs();
+			recheckWork();
+			checkReadyBlocks(); 
+			
+			var selected = $('#acc-select').val();
+			var last = wallet.getLastNBlocks(selected, 20);
+			clearBlocksFromGui();
+
+			for(let i in last)
+				addBlockToGui(last[i]);
+
+
+			setTimeout(function(){
+				$('.landing').fadeOut(500, function(){$('.landing').remove(); $('.wallet-wrapper').fadeIn();});
+			}, 1000);
+		});
+
 	}
 	
 	function mainLoop()
@@ -658,7 +806,7 @@ $(document).ready(function(){
 			wallet.addPendingChangeBlock(selected, repr);
 			var pack = wallet.pack();
 			sync(pack);
-			alertSuccess("Representative changed for account " + selected);
+			alertInfo("Representative changed. Waiting for work to broadcast the block.");
 		}catch(e){
 			console.log(e);
 			alertError('Something happened: ' + e);
@@ -698,14 +846,14 @@ $(document).ready(function(){
 				var color = 'red';
 				var fromto = 'To: ';
 				var symbol = '-';
-				//var account = block.getDestination();
+				var account = block.getDestination();
 			}
 			else
 			{
 				var color = 'green';
 				var fromto = 'From: ';
 				var symbol = '+';
-				//var account = block.getSender();
+				var account = block.getOrigin();
 			}
 			var type = block.getType();
 			
@@ -717,8 +865,8 @@ $(document).ready(function(){
 							'<span class="'+color+' blk-amount">'+symbol+block.getAmount().toFixed(6)+'</span>'+
 						'</div>'+
 						'<div class="col-sm-6">'+
-							'<span class="blk-hash">'+block.getHash(true)+'</span><br/>'+
-							'<span class="blk-account">'+block.getAccount()+'</span>'+
+							'<a href="https://raiblockscommunity.net/block/index.php?h='+block.getHash(true)+'" target="_blank"><span class="blk-hash"> '+block.getHash(true)+'</span></a><br/>'+
+							'<b>'+fromto+'</b><span class="blk-account">'+account+'</span>'+
 						'</div>'+
 						'<div class="col-sm-4 text-center">'+
 							'<button type="button" data-toggle="tooltip" data-placement="left" title="View Block" class="btn btn-default gborder" style="margin-right:5px" onclick="$(\'.txs ul\').find(\'#json_'+block.getHash(true)+'\').fadeToggle();"><i class="fa fa-angle-down" aria-hidden="true"></i></button>'+
@@ -728,17 +876,6 @@ $(document).ready(function(){
 							'<pre><code>'+block.getJSONBlock(true)+'</code></pre>'+
 						'</div>'+
 					'</div>'+
-					/*
-					'<div class="row text-center">'+
-						'<div class="col-sm-2"></div>'+
-						'<div class="col-sm-6">'+
-							'<span class="blk-account">'+block.getAccount()+'</span>'+
-						'</div>'+
-						'<div class="col-sm-4 blk-amount">'+
-							'<span class="'+color+'">'+symbol+block.getAmount().toFixed(6)+'</span>'+
-						'</div>'+
-					'</div>'+
-					*/
 				'</li>'
 			);
 		}
@@ -752,7 +889,7 @@ $(document).ready(function(){
 							'<span class="blk-type '+type+'">'+block.getType()+'</span>'+
 						'</div>'+
 						'<div class="col-sm-6">'+
-							'<span class="blk-hash">'+block.getHash(true)+'</span><br/>'+
+							'<a href="https://raiblockscommunity.net/block/index.php?h='+block.getHash(true)+'" target="_blank"><span class="blk-hash"> '+block.getHash(true)+'</span></a><br/>'+
 							'<span class="blk-account">'+block.getRepresentative()+'</span>'+
 						'</div>'+
 						'<div class="col-sm-4 text-center">'+

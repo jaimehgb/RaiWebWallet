@@ -21,6 +21,8 @@ module.exports = function()
 	var work = "";      // work
 	var blockAmount = 0;// amount transferred
 	var blockAccount;   // account owner of this block
+	var origin;			// account sending money in case of receive or open block
+	var immutable = false; // if true means block has already been confirmed and cannot be changed, some checks are ignored
 	
 	var previous;       // send, receive and change
 	var destination;    // send
@@ -227,9 +229,12 @@ module.exports = function()
 	 * Sets the block work
 	 * 
 	 * @param {string} hex - The hex encoded 8 byte block hash PoW
+	 * @throws An exception if work is not enough
 	 */
 	api.setWork = function(hex)
 	{
+		if(!api.checkWork(hex))
+			throw "Work not valid for block";
 		work = hex;
 		worked = true;
 	}
@@ -261,6 +266,8 @@ module.exports = function()
 	api.setAccount = function(acc)
 	{
 		blockAccount = acc;
+		if(type == 'send')
+			origin = acc;
 	}
 	
 	/**
@@ -270,6 +277,41 @@ module.exports = function()
 	api.getAccount = function()
 	{
 		return blockAccount;
+	}
+	
+	/**
+	 * Sets the account which sent the block 
+	 * @param {string} acc - The xrb account
+	 */
+	api.setOrigin = function(acc)
+	{
+		if(type == 'receive' || type == 'open')
+			origin = acc;
+	}
+	
+	/**
+	 *
+	 * @returns originAccount
+	 */
+	api.getOrigin = function()
+	{
+		if(type == 'receive' || type == 'open')
+			return origin;
+		if(type == 'send')
+			return blockAccount;
+		return false;
+	}
+	
+	/**
+	 *
+	 * @returns destinationAccount
+	 */
+	api.getDestination = function()
+	{
+		if(type == 'send')
+			return accountFromHexKey(destination);
+		if(type == 'receive' || type == 'open')
+			return blockAccount;
 	}
 	
 	/**
@@ -332,6 +374,16 @@ module.exports = function()
 	api.ready = function()
 	{
 		return signed && worked;
+	}
+	
+	api.setImmutable = function(bool)
+	{
+		immutable = bool;
+	}
+	
+	api.isImmutable = function()
+	{
+		return immutable;
 	}
 	
 	/**
@@ -430,13 +482,17 @@ module.exports = function()
 		
 		extras.blockAccount = blockAccount;
 		extras.blockAmount = blockAmount;
+		extras.origin = origin;
 		obj.extras = extras;
 		return JSON.stringify(obj);
 	}
 	
 	api.buildFromJSON = function(json)
 	{
-		var obj = JSON.parse(json);
+		if(typeof(json) != 'object')
+			var obj = JSON.parse(json);
+		else
+			var obj = json;
 
 		switch(obj.type)
 		{
@@ -482,10 +538,33 @@ module.exports = function()
 		{
 			api.setAccount(obj.extras.blockAccount);
 			api.setAmount(obj.extras.blockAmount);
+			api.setOrigin(obj.extras.origin);
 		}
 		api.build();
 		
 	}
+	
+	api.checkWork = function(work, blockHash = false)
+	{
+		if(blockHash === false)
+		{
+			blockHash = api.getPrevious();
+		}
+		
+		var t = hex_uint8(MAIN_NET_WORK_THRESHOLD);
+		var context = blake2bInit(8, null);
+		blake2bUpdate(context, hex_uint8(work).reverse());
+		blake2bUpdate(context, hex_uint8(blockHash));
+		var threshold = blake2bFinal(context).reverse();
+		
+		if(threshold[0] == t[0])
+			if(threshold[1] == t[1])
+				if(threshold[2] == t[2])
+					if(threshold[3] >= t[3])
+						return true;
+		return false;
+	}
+	
 	
 	return api;
 }
