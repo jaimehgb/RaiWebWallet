@@ -221,6 +221,15 @@ module.exports = function(password)
 			throw "Incorrect password.";
 	}
 	
+	api.setIterations = function(newIterationNumber)
+	{
+		newIterationNumber = parseInt(newIterationNumber);
+		if(newIterationNumber < 2)
+			throw "Minumum iteration number is 2.";
+		
+		iterations = newIterationNumber;
+	}
+	
 	/**
 	 * Sets a seed for the wallet
 	 * 
@@ -781,7 +790,7 @@ module.exports = function(password)
 			{
 				if(remoteWork[i].worked)
 				{
-					worked = api.updateWorkPool(blk.getHash(true), remoteWork[i].work);
+					worked = api.updateWorkPool(blk.getPrevious(), remoteWork[i].work);
 					break;
 				}
 			}
@@ -846,7 +855,7 @@ module.exports = function(password)
 			{
 				if(remoteWork[i].worked)
 				{
-					worked = api.updateWorkPool(blk.getHash(true), remoteWork[i].work);
+					worked = api.updateWorkPool(blk.getPrevious(), remoteWork[i].work);
 					break;
 				}
 			}
@@ -887,7 +896,7 @@ module.exports = function(password)
 			{
 				if(remoteWork[i].worked)
 				{
-					worked = api.updateWorkPool(blk.getHash(true), remoteWork[i].work);
+					worked = api.updateWorkPool(blk.getPrevious(), remoteWork[i].work);
 					break;
 				}
 			}
@@ -1001,7 +1010,7 @@ module.exports = function(password)
 		var found = false;
 		if(!api.checkWork(work, hash))
 		{
-			logger.warn("Invalid PoW received.");
+			logger.warn("Invalid PoW received ("+work+") ("+hash+").");
 			return false;
 		}
 		

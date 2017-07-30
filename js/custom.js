@@ -115,7 +115,7 @@ $(document).ready(function(){
 								'<div class="col-xs-3">'+
 									'<b class="green">Received</b>'+
 								'</div>'+
-								'<div class="col-xs-4">'+txObj.date+'</div>'+
+								'<div class="col-xs-4"><a href="https://raiblockscommunity.net/block/index.php?h='+txObj.hash+'" target="_blank">'+txObj.hash.substring(0,20)+'....</a></div>'+
 								'<div class="col-xs-5 text-right">'+
 									'<span class="green">'+(txObj.amount / 1000000).toFixed(8)+'</span> XRB'+
 								'</div>'+
@@ -147,40 +147,23 @@ $(document).ready(function(){
 							'</div></li></ul>');
 	}
 	
+	function addRecentChangeToGui(txObj)
+	{
+		if(recentEmpty)
+			$('.recent').html('');
+		recentEmpty = false;
+		$('.recent').append('<ul id="'+txObj.hash+'"><li><div class="row">'+
+								'<div class="col-xs-3">'+
+									'<b class="change">Change</b>'+
+								'</div>'+
+								'<div class="col-xs-9">'+txObj.representative.substring(0,25)+' ....</div>'+
+							'</div></li></ul>');
+	}
+	
 	function emptyRecent()
 	{
 		recentEmpty = true;
 		$('.recent').append('<div class="row"><div class="col-xs-12" style="color:#888">There is nothing to show here.</div></div>');
-	}
-	
-	function addTxToGui(txObj)
-	{
-		if(txObj.type == 'send' || txObj.type == 'receive')
-		{
-			var color = txObj.type == 'send' ? 'green' : 'red';
-			var type = txObj.type == 'send' ? 'Send' : 'Receive';
-			$('.txs').append('<div class="row">'+
-									'<div class="col-xs-3">'+
-										'<b>'+type+'</b>'+
-									'</div>'+
-									'<div class="col-xs-3">'+txObj.date+'</div>'+
-									'<div class="col-xs-6 text-right">'+
-										'<span class="'+color+'">'+(txObj.amount / 1000000).toFixed(8)+'</span> XRB'+
-									'</div>'+
-								'</div>');
-		}
-		else if(txObj.type == 'change')
-		{
-			$('.txs').append('<div class="row">'+
-									'<div class="col-xs-3">'+
-										'<b>Change Representative</b>'+
-									'</div>'+
-									'<div class="col-xs-3">'+txObj.date+'</div>'+
-									'<div class="col-xs-6 text-right">'+
-										'<span class="green">'+txObj.representative+'</span>'+
-									'</div>'+
-								'</div>');
-		}
 	}
 	
 	function refreshBalances()
@@ -334,6 +317,33 @@ $(document).ready(function(){
 		});
 	}
 	
+	function getPendingBlocks2()
+	{
+		var accs = wallet.getAccounts();
+		var accounts = [];
+		for(let i in accs)
+			accounts.push(accs[i].account);
+		$.post('ajax.php', 'action=getPending2&accounts='+JSON.stringify(accounts), function(data){
+			data = JSON.parse(data);
+			if(data.status == 'success')
+			{
+				for(var account in data.res)
+				{
+					for(let i in data.res[account].blocks)
+					{
+						var blk = data.res[account].blocks[i];
+						if(wallet.addPendingReceiveBlock(blk.hash, account, blk.from, blk.amount))
+						{
+							var txObj = {account: account, amount: blk.amount, date: blk.from, hash: blk.hash}
+							addRecentRecToGui(txObj);
+						}
+					}
+				}
+			}
+			setTimeout(getPendingBlocks2, 5000);
+		})
+	}
+	
 	function remoteWork(hash, acc)
 	{
 		$.post('ajax.php', 'action=remoteWork&hash='+hash, function(data)
@@ -345,7 +355,7 @@ $(document).ready(function(){
 				if(data.work != false)
 					wallet.updateWorkPool(hash, data.work);
 				else
-					wallet.setWorkRequested(hash);
+					wallet.setWorkNeeded(hash);
 			}
 		});
 	}
@@ -425,21 +435,6 @@ $(document).ready(function(){
 	function cancelWait()
 	{
 		waitingForSingleWork = false;
-	}
-	
-	function getWalletTxs(offset = 0)
-	{
-		$.post('ajax.php', 'action=getTransactions&offset='+offset, function(data){
-			data = JSON.parse(data);
-
-			if(data.status == 'success')
-			{
-				for(var i in data.data)
-				{
-					addTxToGui(data[i]);
-				}
-			}
-		});
 	}
   
 	function checkReadyBlocks()
@@ -616,8 +611,7 @@ $(document).ready(function(){
 
 		checkChains(function(){
 			refreshBalances();
-			getPendingBlocks();
-			getWalletTxs();
+			getPendingBlocks2();
 			recheckWork();
 			checkReadyBlocks(); 
 			
@@ -635,17 +629,6 @@ $(document).ready(function(){
 		});
 
 	}
-	
-	function mainLoop()
-	{
-		getPendingBlocks();
-		getWalletTxs();
-		getReadyWork();
-		syncWorkPool();
-		debugAllWallet();
-		setTimeout(mainLoop, 5000);
-	}
-	
 	
 	$('.form-register').submit(function(){
 		// check pass
@@ -803,9 +786,11 @@ $(document).ready(function(){
 		}
 		
 		try{
-			wallet.addPendingChangeBlock(selected, repr);
+			var blk = wallet.addPendingChangeBlock(selected, repr);
 			var pack = wallet.pack();
 			sync(pack);
+			var txObj = {representative: repr, hash: blk.getHash(true)};
+			addRecentChangeToGui(txObj);
 			alertInfo("Representative changed. Waiting for work to broadcast the block.");
 		}catch(e){
 			console.log(e);
@@ -953,6 +938,31 @@ $(document).ready(function(){
 			alertError(e);
 		}
 		
+	});
+	
+	$('#change-iterations').click(function(){
+		var newIterations = parseInt($('#iteration_number').val());
+		if(newIterations < 500)
+		{
+			alertWarning("A greater iteration number is recommended.");
+		}
+		
+		$.post('ajax.php', 'action=iterations&iterations='+newIterations, function(data){
+			data = JSON.parse(data);
+			if(data.status == 'success')
+			{
+				try{
+					wallet.setIterations(newIterations);
+					$('#iteration_number').val('');
+					alertInfo("PBKDF2 iterations updated.");
+				}catch(e){
+					alertError(e);
+				}
+			}
+			else
+				alertError('Error updating setting.');
+		});
+			
 	});
 	
 	$('#download_wallet').click(function(){
