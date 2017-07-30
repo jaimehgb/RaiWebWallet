@@ -15,7 +15,7 @@ Feel free to contribute and post all the issues you find :)<br/>
 <h3>TODO</h3>
 <hr/>
  - Allow user to change pbkdf2 password stretching iterations (security).<br/>
- - ~~Allow user to set a minimum receive amount (Utility)~~<br/>
+ - <del>Allow user to set a minimum receive amount (Utility)</del><br/>
  - Allow user to import a wallet seed, importing all chains in case it has been used already in the network (Utility)<br/>
  - Allow user to import single private keys, of course not backed by the seed (Utility)<br/>
  - Load more transactions when scrolling down the txs page, currently only the last 20 are loaded (UX)<br/>
