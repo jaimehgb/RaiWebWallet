@@ -305,10 +305,11 @@ $(document).ready(function(){
 					var blk = data.data[i];
 					var acc = blk.block.destination;
 					var from = blk.from;
-					wallet.addPendingReceiveBlock(blk.hash, acc, from, blk.amount);
-					
-					var txObj = {account: acc, amount: blk.amount, date: blk.time, hash: blk.hash}
-					addRecentRecToGui(txObj);
+					if(wallet.addPendingReceiveBlock(blk.hash, acc, from, blk.amount))
+					{
+						var txObj = {account: acc, amount: blk.amount, date: blk.time, hash: blk.hash}
+						addRecentRecToGui(txObj);
+					}
 				}
 				sync(wallet.pack());
 				refreshBalances();
@@ -608,6 +609,7 @@ $(document).ready(function(){
 		{
 			addAccountToGUI(accounts[i]);
 		}
+		$('#minimum_receive').val(wallet.getMinimumReceive());
 
 		checkChains(function(){
 			refreshBalances();
@@ -897,6 +899,27 @@ $(document).ready(function(){
 		rebroadcastBlock(hash);
 	});
 	
+	$('.form-minimum').submit(function(event){
+		event.preventDefault();
+		var minimum = parseInt($('#minimum_receive').val());
+		if(minimum < 0)
+		{
+			alertError('Invalid minimum amount');
+			return;
+		}
+		
+		if(wallet.setMinimumReceive(minimum))
+		{
+			sync(wallet.pack());
+			alertInfo('Settings updated');
+		}
+		else
+		{
+			$('#minimum_receive').val(wallet.getMinimumReceive());
+			alertError('Error updating setting. Make sure you entered a valid number in rai units.');
+		}
+	});
+	
 	$('#seed_button').click(function(){
 		try{
 			$('#seed_backup').val(wallet.getSeed($('#seed_pass').val()));
@@ -942,27 +965,19 @@ $(document).ready(function(){
 	
 	$('#change-iterations').click(function(){
 		var newIterations = parseInt($('#iteration_number').val());
+		var oldIterations = wallet.getIterations();
 		if(newIterations < 500)
 		{
 			alertWarning("A greater iteration number is recommended.");
 		}
 		
-		$.post('ajax.php', 'action=iterations&iterations='+newIterations, function(data){
-			data = JSON.parse(data);
-			if(data.status == 'success')
-			{
-				try{
-					wallet.setIterations(newIterations);
-					$('#iteration_number').val('');
-					alertInfo("PBKDF2 iterations updated.");
-				}catch(e){
-					alertError(e);
-				}
-			}
-			else
-				alertError('Error updating setting.');
-		});
-			
+		try{
+			wallet.setIterations(newIterations);
+			$('#iteration_number').val('');
+			alertInfo("PBKDF2 iterations updated.");
+		}catch(e){
+			alertError(e);
+		}
 	});
 	
 	$('#download_wallet').click(function(){

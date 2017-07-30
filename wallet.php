@@ -5,7 +5,7 @@
             <ul class="sidebar-nav">
                 <li class="sidebar-brand">
                     <a href="#">
-                        RAIWALLET
+                        RAIWALLET <span style="font-size:15px; color:#f00">Alpha</span>
                     </a>
                 </li>
                 <li class="active">
@@ -14,11 +14,9 @@
                 <li>
                     <a href="#" id="gtxs"><i class="fa fa-exchange" aria-hidden="true" style="display:inline"></i> Transactions</a>
                 </li>
-                <!--
                 <li>
                     <a href="#" id="gsettings"><i class="fa fa-cogs" aria-hidden="true" style="display:inline"></i> Settings</a>
                 </li>
-                -->
                 <li>
                     <a href="#" id="gsecurity"><i class="fa fa-lock" aria-hidden="true" style="display:inline"></i> Security</a>
                 </li>
@@ -99,19 +97,24 @@
                 
                 <!-- Settings -->
                 <div class="row settings" style="display:none">
-                    <div class="col-md-12">
+                    <div class="col-md-12 b-line">
                         <div class="col-md-12">
-                            <h3>Last Transactions</h3>
-                            <div class="acc-selector">
-                                <select name="acc" id="acc-select" class="form-control" style="font-family:monospace">
-                                    
-                                </select>
-                            </div>
-                            <div class="txs">
-                                <ul>
-                                    
-                                </ul>
-                            </div>
+                            <h3>Minimum Receive Amount</h3>
+                            <p>
+                                Enter below the minimum amount in a receive transaction you want to spend PoW in. Lower amounts will not be 
+                                pocketed. You can change this setting whenever you wish.
+                            </p>
+                            <form method="post" class="form-minimum">
+                                <div class="form-group">
+                                    <label>Minimum receive amount (rai units)</label>
+                                    <input type="text" name="minimum_receive" id="minimum_receive" class="form-control" placeholder="e.g.: 1000000" />
+                                </div>
+                                <div class="form-group">
+                                    <button type="submit" id="change_minimum" class="btn btn-primary">
+                                        Update
+                                    </button>
+                                </div>
+                            </form>
                         </div>
                     </div>
                 </div>
@@ -170,6 +173,28 @@
                             </form>
                         </div>
                     </div>
+                    <!--
+                    <div class="col-md-12 b-line">
+                        <div class="col-md-12">
+                            <h3>Password Stretching Iterations</h3>
+                            <p>
+                                The higher the number the more difficult it will be to brute force your password and decrypt your wallet.
+                                But it will also increase the time your browser will need to decrypt it.
+                            </p>
+                            <form method="post">
+                                <div class="form-group">
+                                    <label>PBKDF2 Iterations</label>
+                                    <input type="text" name="iterations" id="iteration_number" class="form-control"/>
+                                </div>
+                                <div class="form-group">
+                                    <button type="button" class="btn btn-primary" id="change-iterations">
+                                        Change
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                    -->
                     <div class="col-md-12 b-line">
                         <div class="col-md-12">
                             <h3>Download Wallet Data</h3>

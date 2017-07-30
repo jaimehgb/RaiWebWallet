@@ -142,6 +142,7 @@ module.exports = function(password)
 	var pendingBlocks = [];             // current account pending blocks
 	var chain = [];                     // current account chain
 	var representative;					// current account representative	
+	var minimumReceive = 1;				// minimum amount to pocket
 	
 	var keys = [];                      // wallet keys, accounts, and all necessary data
 	var recentTxs = [];                 
@@ -228,6 +229,22 @@ module.exports = function(password)
 			throw "Minumum iteration number is 2.";
 		
 		iterations = newIterationNumber;
+	}
+	
+	api.setMinimumReceive = function(rai_amount)
+	{
+		rai_amount = parseInt(rai_amount);
+		if(rai_amount < 0)
+			return false;
+		if(isNaN(rai_amount))
+			return false;
+		minimumReceive = rai_amount;
+		return true;
+	}
+	
+	api.getMinimumReceive = function()
+	{
+		return minimumReceive;
 	}
 	
 	/**
@@ -809,6 +826,12 @@ module.exports = function(password)
 	{
 		api.useAccount(acc);
 		
+		if(amount < minimumReceive)
+		{
+			logger.log("Receive block rejected due to minimum receive amount (" + sourceBlockHash + ")");
+			return false;
+		}
+		
 		// make sure this source has not been redeemed yet
 		for(let i in walletPendingBlocks)
 		{
@@ -1324,6 +1347,7 @@ module.exports = function(password)
 		pack.recent = recentTxs;
 		pack.remoteWork = remoteWork;
 		pack.autoWork = autoWork;
+		pack.minimumReceive = minimumReceive;
 		
 		pack = JSON.stringify(pack);
 		pack = stringToHex(pack);
@@ -1376,6 +1400,7 @@ module.exports = function(password)
 		remoteWork = [];
 		autoWork = walletData.autoWork;
 		readyBlocks = [];
+		minimumReceive = walletData.minimumReceive != undefined ? parseInt(walletData.minimumReceive) : 1;
 		
 		for(let i in walletData.readyBlocks)
 		{

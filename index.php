@@ -227,6 +227,21 @@ session_start();
             }
         });
         
+        $('#gsettings').click(function(event){
+            event.preventDefault();
+            if(active != 'settings')
+            {
+                $('.sidebar-nav .active').removeClass('active');
+                $('#gsettings').parent().addClass('active');
+                $('.current').fadeOut(500, function(){
+                    $('.current').removeClass('current');
+                    $('.settings').fadeIn();
+                    $('.settings').addClass('current');
+                    active = 'settings';
+                });
+            }
+        });
+        
         $('#gdebug').click(function(event){
             event.preventDefault();
             if(active != 'debug')
