@@ -256,6 +256,22 @@
                 box-shadow:2px 2px 3px #888;
                 margin-bottom:10px;
             }
+            .label-input{
+                width:100%;
+                padding: 5px;
+                border: none;
+                border-bottom: solid 1px #ccc;
+                color: #777;
+                margin-bottom: 10px;
+                background: transparent;
+            }
+            .label-input:focus{
+                border-bottom: solid 2px #b382e3;
+                outline: none;
+            }
+            .cstm-pencil{
+                margin-left:-20px;
+            }
             .txs ul li{
                 overflow-x:auto;
             }

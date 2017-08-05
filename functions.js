@@ -26,6 +26,22 @@ function accountFromHexKey (hex)
 	
 }
 
+function parseXRBAccount(str)
+{
+	var i = str.indexOf('xrb_');
+	if(i != -1)
+	{
+		var acc = str.slice(i, i + 64);
+		try{
+			keyFromAccount(acc);
+			return acc;
+		}catch (e){
+			return false;
+		}
+	}
+	return false;
+}
+
 
 function dec2hex(str, bytes = null)
 {

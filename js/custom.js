@@ -96,14 +96,86 @@ $(document).ready(function(){
 	
 	function addAccountToGUI(accountObj)
 	{
-		$('.accounts ul').append('<li><div class="row"><div class="col-xs-12"><span>'+accountObj.account+'</span></div></div></li>');
-		$('#send-select').append('<option class="acc_select_'+accountObj.account+'">'+accountObj.account+' ('+(accountObj.balance / 1000000).toFixed(8)+' XRB)</option>');
-		$('#receive-select').append('<option class="acc_select_'+accountObj.account+'">'+accountObj.account+' ('+(accountObj.balance / 1000000).toFixed(8)+' XRB)</option>');
-		$('#change-select').append('<option>'+accountObj.account+'</option>');
-			//var selected = $('#change-select').val();
-			//var repr = wallet.getRepresentative(selected);
-			//$('#acc-repr').val(repr);
-		$('#acc-select').append('<option>'+accountObj.account+'</option>');
+		var label_txt = "";
+		var label_txt2 = "";
+		if(accountObj.label !== undefined && accountObj.label != "")
+		{
+			label_txt = accountObj.label;
+			label_txt2 = '('+label_txt+') - ';
+		}
+		
+		var li = document.createElement('LI');
+		var row = document.createElement('DIV');
+		row.className += ' row';
+		
+		var _1 = document.createElement('DIV');
+		_1.className += ' col-xs-12';
+		if(label_txt == "")
+			_1.className += ' hidden';
+		
+		var input = document.createElement('input');
+		input.setAttribute('data-account', accountObj.account);
+		input.type = "text";
+		input.value = label_txt;
+		input.className += ' label-input';
+		input.placeholder = 'e.g.: RaiGames dep. address';
+		input.spellcheck = false;
+		var pencil = document.createElement('I');
+		pencil.setAttribute('aria-hidden', 'true');
+		pencil.className += ' fa fa-pencil cstm-pencil';
+		_1.appendChild(input);
+		_1.appendChild(pencil);
+		row.appendChild(_1);
+		
+		var _2 = document.createElement('DIV');
+		_2.className += 'col-xs-12';
+		
+		var span = document.createElement('SPAN');
+		var txt = document.createTextNode(accountObj.account);
+		span.appendChild(txt);
+		_2.appendChild(span);
+		row.appendChild(_2);
+		li.appendChild(row);
+		document.querySelector('.accounts ul').appendChild(li);
+		
+		if(label_txt == "")
+		{
+			li.addEventListener('click', function(){
+				showLabelInput(_1);
+			});
+		}
+		input.addEventListener('change', function(){
+			updateAccountLabel(accountObj.account, input);
+		});
+		
+		
+		$('#send-select').append('<option class="acc_select_'+accountObj.account+'">'+label_txt2+accountObj.account+' ('+(accountObj.balance / 1000000).toFixed(6)+' XRB)</option>');
+		$('#receive-select').append('<option class="acc_select_'+accountObj.account+'">'+label_txt2+accountObj.account+' ('+(accountObj.balance / 1000000).toFixed(6)+' XRB)</option>');
+		$('#change-select').append('<option>'+label_txt2+accountObj.account+'</option>');
+		$('#acc-select').append('<option>'+label_txt2+accountObj.account+'</option>');
+	}
+	
+	function showLabelInput(_1)
+	{
+		if($(_1).hasClass('hidden'))
+		{
+			$(_1).fadeOut(0).removeClass('hidden');
+			$(_1).fadeIn();
+		}
+	}
+	
+	function updateAccountLabel(acc, input)
+	{
+		var val = input.value;
+		if(val == "" && !$(input).hasClass('hidden'))
+		{
+			$(input).parent().fadeOut(1000, function(){input.addClass('hidden')});
+		}
+		if (wallet.setLabel(acc, val))
+		{
+			sync(wallet.pack());
+			alertInfo('Label updated');
+		}
 	}
 	
 	function addRecentRecToGui(txObj)
@@ -179,8 +251,11 @@ $(document).ready(function(){
 		{
 			var acc = accs[i].account;
 			var bal = accs[i].balance;
-			
-			$('select').find('.acc_select_'+acc).html(acc+' ('+(bal / 1000000).toFixed(6)+' XRB)');
+			var label = accs[i].label;
+			if(label == "")
+				$('select').find('.acc_select_'+acc).html(acc+' ('+(bal / 1000000).toFixed(6)+' XRB)');
+			else
+				$('select').find('.acc_select_'+acc).html('('+label+') - '+acc+' ('+(bal / 1000000).toFixed(6)+' XRB)');
 		}
 	}
 	
@@ -276,7 +351,7 @@ $(document).ready(function(){
 	
 	function refreshChain()
 	{
-		var selected = $('#acc-select').val();
+		var selected = parseXRBAccount($('#acc-select').val());
 		var last = wallet.getLastNBlocks(selected, 20);
 		clearBlocksFromGui();
 		
@@ -286,9 +361,10 @@ $(document).ready(function(){
 	
 	function updateReceiveQr(account = null)
 	{
-		var acc = account ? account : $('#receive-select').val().split(' ')[0];
+		var acc = account ? account : parseXRBAccount($('#receive-select').val());
 		var am = $('#receive-amount').val();
-		$('#qr .img').html('<img style="height: 200px; margin-left: auto; margin-right: auto;" src="https://chart.googleapis.com/chart?chs=200x200&cht=qr&chl=raiblocks:'+acc+'?amount='+am+'">')
+		if(acc)
+			$('#qr .img').html('<img style="height: 200px; margin-left: auto; margin-right: auto;" src="https://chart.googleapis.com/chart?chs=200x200&cht=qr&chl=raiblocks:'+acc+'?amount='+am+'">')
 		$('.qr-bot').html('<code>'+acc+'</code>');
 		$('#qr').addClass('well');
 	}
@@ -617,7 +693,7 @@ $(document).ready(function(){
 			recheckWork();
 			checkReadyBlocks(); 
 			
-			var selected = $('#acc-select').val();
+			var selected = parseXRBAccount($('#acc-select').val());
 			var last = wallet.getLastNBlocks(selected, 20);
 			clearBlocksFromGui();
 
@@ -715,8 +791,9 @@ $(document).ready(function(){
 		var error = false;
 		
 		// from
-		var from = $('#send-select').val();
-		from = from.split(' ')[0];
+		var from = parseXRBAccount($('#send-select').val());
+		if(from === false)
+			return alertError('Invalid origin address');
 		
 		// check address
 		var to = $('#to').val();
@@ -777,7 +854,7 @@ $(document).ready(function(){
 	});
 	
 	$('#change_repr').click(function(){
-		var selected = $('#change-select').val();
+		var selected = parseXRBAccount($('#change-select').val());
 		var repr = $('#acc-repr').val();
 		
 		try{
@@ -809,7 +886,7 @@ $(document).ready(function(){
 	});
 	
 	$('#change-select').change(function(){
-		var selected = $('#change-select').val();
+		var selected = parseXRBAccount($('#change-select').val());
 		var repr = wallet.getRepresentative(selected);
 		$('#acc-repr').val(repr);
 	});

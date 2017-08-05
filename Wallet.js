@@ -333,11 +333,11 @@ module.exports = function(password)
 				lastPendingBlock: "",
 				subscribed: false,
 				chain: [],
-				representative: ""
+				representative: "",
+				label : ""
 			}
 		);
 		logger.log("New key added to wallet.");
-		console.log(keys);
 	}
 	
 	/**
@@ -363,7 +363,12 @@ module.exports = function(password)
 		var accounts = [];
 		for(var i in keys)
 		{
-			accounts.push({account: keys[i].account, balance: keys[i].balance, pendingBalance: keys[i].pendingBalance});
+			accounts.push({
+				account: keys[i].account,
+				balance: keys[i].balance, 
+				pendingBalance: keys[i].pendingBalance,
+				label: keys[i].label
+			});
 		}
 		return accounts;
 	}
@@ -713,6 +718,19 @@ module.exports = function(password)
 		api.useAccount(acc);
 		keys[current].subscribed = true;
 		api.useAccount(nowUsing);
+	}
+	
+	api.setLabel = function(acc, label)
+	{
+		for(let i in keys)
+		{
+			if(keys[i].account == acc)
+			{
+				keys[i].label = label;
+				return true;
+			}
+		}
+		return false;
 	}
 	
 	api.removePendingBlocks = function()
@@ -1328,6 +1346,7 @@ module.exports = function(password)
 			aux.pendingBlocks = [];
 			aux.chain = [];
 			aux.representative = keys[i].representative;
+			aux.label = keys[i].label;
 			
 			for(let j in keys[i].chain)
 			{
@@ -1430,7 +1449,8 @@ module.exports = function(password)
 			aux.pendingBalance = walletData.keys[i].pendingBalance ? walletData.keys[i].pendingBalance : 0;
 			aux.pendingBlocks = [];
 			aux.representative = walletData.keys[i].representative != undefined ? walletData.keys[i].representative : aux.account;
-			
+			aux.label = walletData.keys[i].label != undefined ? walletData.keys[i].label : "";
+				
 			keys.push(aux);
 			if(lastPendingBlock.length == 64)
 				api.workPoolAdd(lastPendingBlock, aux.account, true);
