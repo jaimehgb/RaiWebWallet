@@ -374,32 +374,6 @@ module.exports = function(password)
 	}
 	
 	/**
-	 * Returns all non subscribed accounts
-	 *
-	 * @returns {Array}
-	 */
-	api.getNonSubscribedAccounts = function()
-	{
-		var accounts = [];
-		for(let i in keys)
-		{
-			if(!keys[i].subscribed)
-				accounts.push(keys[i].account);
-		}
-		return accounts;
-	}
-	
-	/**
-	 * Returns the wallet recent txs
-	 * 
-	 * @returns {Array}
-	 */
-	api.getRecentTxs = function()
-	{
-		return recentTxs;
-	}
-	
-	/**
 	 * Switches the account being used by the wallet
 	 * 
 	 * @param {string} accountToUse
@@ -704,20 +678,6 @@ module.exports = function(password)
 		api.useAccount(acc);
 		private.setPendingBalance(parseInt(api.getPendingBalance()) + parseInt(amount));
 		api.useAccount(keys[temp].account);
-	}
-	
-	/**
-	 * Sets an account as subscribed to notifications at server side
-	 * 
-	 * @param {string} account 
-	 * @throws an exception if account is not in the wallet
-	 */
-	api.setAccountAsSubscribed = function(acc)
-	{
-		var nowUsing = keys[current].account;
-		api.useAccount(acc);
-		keys[current].subscribed = true;
-		api.useAccount(nowUsing);
 	}
 	
 	api.setLabel = function(acc, label)
