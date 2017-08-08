@@ -173,7 +173,7 @@ $(document).ready(function(){
 		}
 		if (wallet.setLabel(acc, val))
 		{
-			sync(wallet.pack());
+			sync();
 			alertInfo('Label updated');
 		}
 	}
@@ -259,37 +259,9 @@ $(document).ready(function(){
 		}
 	}
 	
-	function sync(walletCipher)
+	function sync()
 	{
-		$.post('ajax.php', 'action=sync&data='+walletCipher);
-	}
-	
-	function subscribeAccount(account)
-	{
-		$.post('ajax.php', 'action=subscribeAccount&account='+account+'&pubkey='+keyFromAccount(account), function(data){
-			data = JSON.parse(data);
-			
-			if(data.status == 'success')
-			{
-				try{
-					wallet.setAccountAsSubscribed(account);
-				}catch(e){
-					// account not in wallet :P
-					console.log("Trying to subscribe an account not in the wallet.");
-				}
-			}
-		})
-	}
-	
-	function recheckSubscriptions()
-	{
-		//TODO
-	}
-  
-	function recheckBroadcastedBlocks()
-	{
-		var blocks = wallet.getNonBroadcastedBlocks();
-		// TODO
+		$.post('ajax.php', 'action=sync&data='+wallet.pack());
 	}
 	
 	function recheckWork()
@@ -324,7 +296,7 @@ $(document).ready(function(){
 				removeRecentFromGui(guiHash);
 				console.log('Block broadcasted to network: '+hash);
 				alertInfo(blk.getType()+" block broadcasted to network.");
-				sync(wallet.pack());
+				sync();
 				updateAccountGUI(blk.getAccount());
 			}
 			else
@@ -387,7 +359,7 @@ $(document).ready(function(){
 						addRecentRecToGui(txObj);
 					}
 				}
-				sync(wallet.pack());
+				sync();
 				refreshBalances();
 			}
 			setTimeout(getPendingBlocks, 5000);
@@ -421,7 +393,7 @@ $(document).ready(function(){
 		})
 	}
 	
-	function remoteWork(hash, acc)
+	function remoteWork(hash)
 	{
 		$.post('ajax.php', 'action=remoteWork&hash='+hash, function(data)
 		{
@@ -436,40 +408,6 @@ $(document).ready(function(){
 			}
 		});
 	}
-	
-	function getReadyWork()
-	{
-		if(wallet.waitingRemoteWork())
-		{
-			$.post('ajax.php', 'action=getRemoteWork&last='+lastWorkRetrieved, function(data){
-				data = JSON.parse(data);
-				if(data.status == 'success')
-				{
-					for(let i in data.data)
-					{
-						wallet.updateWorkPool(data.data[i].hash, data.data[i].work);
-					}
-					lastWorkRetrieved = data.last;
-				}
-			});
-		}
-		setTimeout(getReadyWork, 3000);
-	}
-	
-	
-	function syncWorkPool()
-	{
-		var pool = wallet.getWorkPool();
-		for(var i in pool)
-		{
-			if(!pool[i].worked)
-			{
-				remoteWork(pool[i].hash, pool[i].account);
-			}
-		}
-	  setTimeout(syncWorkPool, 5000);
-	}
-	
 	
 	function getSingleWork(hash, acc)
 	{
@@ -498,7 +436,7 @@ $(document).ready(function(){
 						else
 						{
 							// not found? submit it
-							remoteWork(hash, acc);
+							remoteWork(hash);
 						}
 					}
 					else
@@ -731,7 +669,6 @@ $(document).ready(function(){
 						$('.registered').fadeIn(500);
 					});
 					registered = true;
-					subscribeAccount(wallet.getAccounts()[0].account);
 				}
 				else
 				{
@@ -833,7 +770,7 @@ $(document).ready(function(){
 				$(".modal").modal('hide');
 				alertInfo("Transaction built successfully. Waiting for work ...");
 				addRecentSendToGui({date: "Just now", amount: amountRai, hash: hash});
-				remoteWork(blk.getPrevious(), blk.getAccount());
+				remoteWork(blk.getPrevious());
 			}catch(e){
 				alertError('Ooops, something happened: ' + e.message);
 			}
@@ -845,9 +782,7 @@ $(document).ready(function(){
 	$('#generate_acc').click(function(){
 		var newAccount = wallet.newKeyFromSeed();
 		addAccountToGUI({account: newAccount, balance: 0});
-		var pack = wallet.pack();
-		sync(pack);
-		subscribeAccount(newAccount);
+		sync();
 		alertSuccess('New account added to wallet.');
 		wallet.useAccount(newAccount);
 		updateReceiveQr(newAccount);
@@ -866,8 +801,7 @@ $(document).ready(function(){
 		
 		try{
 			var blk = wallet.addPendingChangeBlock(selected, repr);
-			var pack = wallet.pack();
-			sync(pack);
+			sync();
 			var txObj = {representative: repr, hash: blk.getHash(true)};
 			addRecentChangeToGui(txObj);
 			alertInfo("Representative changed. Waiting for work to broadcast the block.");
@@ -987,7 +921,7 @@ $(document).ready(function(){
 		
 		if(wallet.setMinimumReceive(minimum))
 		{
-			sync(wallet.pack());
+			sync();
 			alertInfo('Settings updated');
 		}
 		else
@@ -1029,7 +963,7 @@ $(document).ready(function(){
 		
 		try{
 			wallet.changePass(old, new1);
-			sync(wallet.pack());
+			sync();
 			alertSuccess('Password successfully changed.');
 			old = $('#change-pass-current').val('');
 			new1 = $('#change-pass-new1').val('');
