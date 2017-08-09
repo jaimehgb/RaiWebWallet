@@ -267,12 +267,39 @@ $(document).ready(function(){
 	function recheckWork()
 	{
 		var pool = wallet.getWorkPool();
+		var batch = [];
+		
 		for(let i in pool)
 		{
 			if(!pool[i].requested || pool[i].needed)
 			{
-				remoteWork(pool[i].hash);
+				batch.push(pool[i].hash);
 			}
+		}
+		
+		if(batch.length > 0)
+		{
+			if(batch.length > 1)
+			{
+				$.post('ajax.php', 'action=batchWork&batch='+JSON.stringify(batch), function(data){
+					data = JSON.parse(data);
+					if(data.status == 'success')
+					{
+						console.log('Work requested for blocks ', batch);
+						for(let i in data.workRes)
+						{
+							var work = data.workRes[i].work;
+							var hash = data.workRes[i].hash;
+							if(data.work != false)
+								wallet.updateWorkPool(hash, work);
+							else
+								wallet.setWorkNeeded(hash);
+						}
+					}
+				});
+			}
+			else
+				remoteWork(batch[0].hash);
 		}
 		setTimeout(recheckWork, 5000);
 	}
