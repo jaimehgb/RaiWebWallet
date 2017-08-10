@@ -5,7 +5,7 @@
             <ul class="sidebar-nav">
                 <li class="sidebar-brand">
                     <a href="#">
-                        RAIWALLET <span style="font-size:15px; color:#f00">Alpha</span>
+                        RAIWALLET <span style="font-size:15px; color:#f00">Beta</span>
                     </a>
                 </li>
                 <li class="active">
