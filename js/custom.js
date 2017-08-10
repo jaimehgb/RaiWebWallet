@@ -7,6 +7,9 @@ var recentEmpty = true;
 var lastWorkRetrieved = 0;
 var waitingForSingleWork = false;
 var logger = new Logger(true);
+var txsOffset = 0;
+var bottomReached = false;
+var loadingTxs = false;
 
 var RESOLVE_FORKS_BLOCK_BATCH_SIZE = 20;
 
@@ -70,6 +73,28 @@ $(document).ready(function(){
 			loader: false
 		})
 	}
+	
+	$(window).scroll(function(){
+		if($(window).scrollTop() >= $(document).height() - $(window).height() - 60)
+		{
+			if(active == 'transactions' && !bottomReached && !loadingTxs)
+			{
+				loadingTxs = true;
+				var blks = wallet.getLastNBlocks(parseXRBAccount($('#acc-select').val()), 10, txsOffset);
+				if(blks.length > 0)
+				{
+					txsOffset += blks.length;
+					for(let i in blks)
+					{
+						addBlockToGui(blks[i]);
+					}
+				}
+				else
+					bottomReached = true;
+				loadingTxs = false;
+			}
+		}
+	}); 
 	
 	$('#refreshdebug').click(function(){
 		var logs = logger.getLogs();
@@ -350,6 +375,10 @@ $(document).ready(function(){
 	
 	function refreshChain()
 	{
+		txsOffset = 0;
+		bottomReached = false;
+		loadingTxs = false;
+		
 		var selected = parseXRBAccount($('#acc-select').val());
 		var last = wallet.getLastNBlocks(selected, 20);
 		clearBlocksFromGui();
@@ -862,8 +891,13 @@ $(document).ready(function(){
 	});
 	
 	
-	function addBlockToGui(block)
+	function addBlockToGui(block, prepend = false)
 	{
+		if(prepend)
+			var func = 'prepend';
+		else
+			var func = 'append';
+		
 		if(block.getType() != 'change')
 		{
 			if(block.getType() == 'send')
@@ -882,7 +916,7 @@ $(document).ready(function(){
 			}
 			var type = block.getType();
 			
-			$('.txs ul').append(
+			$('.txs ul')[func](
 				'<li id="tx_' + block.getHash(true) + '">'+
 					'<div class="row">'+
 						'<div class="col-sm-2">'+
@@ -907,7 +941,7 @@ $(document).ready(function(){
 		else
 		{
 			var type = "change";
-			$('.txs ul').append(
+			$('.txs ul')[func](
 				'<li id="tx_' + block.getHash(true) + '">'+
 					'<div class="row">'+
 						'<div class="col-sm-2">'+
