@@ -24,7 +24,7 @@
                     <a href="#" id="gdebug"><i class="fa fa-bug" aria-hidden="true" style="display:inline"></i> Debug</a>
                 </li>
                 <li>
-                    <a href="/" id="gout"><i class="fa fa-sign-out" aria-hidden="true" style="display:inline"></i> Sign Out</a>
+                    <a href="/out" id="gout"><i class="fa fa-sign-out" aria-hidden="true" style="display:inline"></i> Sign Out</a>
                 </li>
             </ul>
         </div>

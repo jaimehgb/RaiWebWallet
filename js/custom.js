@@ -10,6 +10,7 @@ var logger = new Logger(true);
 var txsOffset = 0;
 var bottomReached = false;
 var loadingTxs = false;
+var lastAction = 0;
 
 var RESOLVE_FORKS_BLOCK_BATCH_SIZE = 20;
 
@@ -286,7 +287,13 @@ $(document).ready(function(){
 	
 	function sync()
 	{
-		$.post('ajax.php', 'action=sync&data='+wallet.pack());
+		$.post('ajax.php', 'action=sync&data='+wallet.pack(), function(data){
+			data = JSON.parse(data);
+			if(data.status == 'redirect')
+			{
+				window.location.href=data.location;
+			}
+		});
 	}
 	
 	function recheckWork()
@@ -321,6 +328,10 @@ $(document).ready(function(){
 								wallet.setWorkNeeded(hash);
 						}
 					}
+					else if(data.status == 'redirect')
+					{
+						window.location.href=data.location;
+					}
 				});
 			}
 			else
@@ -350,6 +361,10 @@ $(document).ready(function(){
 				alertInfo(blk.getType()+" block broadcasted to network.");
 				sync();
 				updateAccountGUI(blk.getAccount());
+			}
+			else if(data.status == 'redirect')
+			{
+				window.location.href=data.location;
 			}
 			else
 			{
@@ -418,6 +433,10 @@ $(document).ready(function(){
 				sync();
 				refreshBalances();
 			}
+			else if(data.status == 'redirect')
+			{
+				window.location.href=data.location;
+			}
 			setTimeout(getPendingBlocks, 5000);
 		});
 	}
@@ -445,6 +464,10 @@ $(document).ready(function(){
 					}
 				}
 			}
+			else if(data.status == 'redirect')
+			{
+				window.location.href=data.location;
+			}
 			setTimeout(getPendingBlocks2, 5000);
 		})
 	}
@@ -461,6 +484,10 @@ $(document).ready(function(){
 					wallet.updateWorkPool(hash, data.work);
 				else
 					wallet.setWorkNeeded(hash);
+			}
+			else if(data.status == 'redirect')
+			{
+				window.location.href=data.location;
 			}
 		});
 	}
@@ -494,6 +521,10 @@ $(document).ready(function(){
 							// not found? submit it
 							remoteWork(hash);
 						}
+					}
+					else if(data.status == 'redirect')
+					{
+						window.location.href=data.location;
 					}
 					else
 						setTimeout(request, 3000);
@@ -572,6 +603,10 @@ $(document).ready(function(){
 					}
 				}
 			}
+			else if(data.status == 'redirect')
+			{
+				window.location.href=data.location;
+			}
 			else
 				logger.warn('Unable check if chain is synced with network.');
 			callback();
@@ -647,6 +682,10 @@ $(document).ready(function(){
 						}
 					}
 				}
+				else if(data.status == 'redirect')
+				{
+					window.location.href=data.location;
+				}
 				else
 				{
 					// try again ...
@@ -694,7 +733,12 @@ $(document).ready(function(){
 			for(let i in last)
 				addBlockToGui(last[i]);
 
-
+			lastAction = Date.now() / 1000;
+			autoSignOut();
+			$('button, li, input').click(function(){
+				lastAction = Date.now() / 1000;
+			});
+			
 			setTimeout(function(){
 				$('.landing').fadeOut(500, function(){$('.landing').remove(); $('.wallet-wrapper').fadeIn();});
 			}, 1000);
@@ -1066,5 +1110,11 @@ $(document).ready(function(){
 		$('.txs ul').html('');
 	}
 	
+	function autoSignOut()
+	{
+		if(Date.now() / 1000 - lastAction > 3600 * 0.5)
+			window.location.href = '/out';
+		setTimeout(autoSignOut, 30000);
+	}
 	
 });

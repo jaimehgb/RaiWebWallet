@@ -259,7 +259,12 @@ session_start();
         
         $(function () {
           $('[data-toggle="tooltip"]').tooltip()
-        })  
+        });
+        
+        <?php if($_SESSION['logged']){ ?>
+        $('.login').click();
+        <?php } ?>
+        
     </script>
     
     
