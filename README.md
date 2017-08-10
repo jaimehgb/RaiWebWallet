@@ -18,11 +18,11 @@ Feel free to contribute and post all the issues you find :)<br/>
  - <del>Allow user to set a minimum receive amount (Utility)</del><br/>
  - Allow user to import a wallet seed, importing all chains in case it has been used already in the network (Utility)<br/>
  - Allow user to import single private keys, of course not backed by the seed (Utility)<br/>
- - Load more transactions when scrolling down the txs page, currently only the last 20 are loaded (UX)<br/>
+ - <del>Load more transactions when scrolling down the txs page, currently only the last 20 are loaded (UX)</del><br/>
  - Change URI when changing tabs (UX)<br/>
- - On page refresh, show up the login modal with the wallet id already filled so users can log back in quickly (UX)<br/>
+ - <del>On page refresh, show up the login modal with the wallet id already filled so users can log back in quickly (UX)</del><br/>
  - Intensive testing.<br/>
  - Code cleaning.<br/>
- - Client/Server comunication optimization, there are too many calls.<br/>
+ - <del>Client/Server comunication optimization, there are too many calls.</del><br/>
  
  
