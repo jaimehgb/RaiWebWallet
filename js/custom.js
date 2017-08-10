@@ -739,6 +739,9 @@ $(document).ready(function(){
 				lastAction = Date.now() / 1000;
 			});
 			
+			window.history.pushState("home", "RaiWallet - Home", "/home");
+			document.title = 'RaiWallet - Home';
+			
 			setTimeout(function(){
 				$('.landing').fadeOut(500, function(){$('.landing').remove(); $('.wallet-wrapper').fadeIn();});
 			}, 1000);

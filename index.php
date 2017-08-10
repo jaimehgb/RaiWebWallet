@@ -149,6 +149,7 @@ session_start();
     
     <script>
         var active = 'home';
+        var moving = false;
         
         $('.signup').click(function(){
             $("#login-modal").modal('hide');
@@ -192,7 +193,13 @@ session_start();
                     $('.current').removeClass('current');
                     $('.dashboard').fadeIn();
                     $('.dashboard').addClass('current');
+                    if(!moving)
+                    {
+                        window.history.pushState("home", "RaiWallet - Home", "/home");
+                        document.title = 'RaiWallet - Home';
+                    }
                     active = 'home';
+                    moving = false;
                 });
             }
         });
@@ -207,7 +214,13 @@ session_start();
                     $('.current').removeClass('current');
                     $('.transactions').fadeIn();
                     $('.transactions').addClass('current');
+                    if(!moving)
+                    {
+                        window.history.pushState("transactions", "RaiWallet - Transactions", "/transactions");
+                        document.title = 'RaiWallet - Transactions';
+                    }
                     active = 'transactions';
+                    moving = false;
                 });
             }
         });
@@ -222,7 +235,13 @@ session_start();
                     $('.current').removeClass('current');
                     $('.security').fadeIn();
                     $('.security').addClass('current');
+                    if(!moving)
+                    {
+                        window.history.pushState("security", "RaiWallet - Security", "/security");
+                        document.title = 'RaiWallet - Security';
+                    }
                     active = 'security';
+                    moving = false;
                 });
             }
         });
@@ -237,7 +256,13 @@ session_start();
                     $('.current').removeClass('current');
                     $('.settings').fadeIn();
                     $('.settings').addClass('current');
+                    if(!moving)
+                    {
+                        window.history.pushState("settings", "RaiWallet - Settings", "/settings");
+                        document.title = 'RaiWallet - Settings';
+                    }
                     active = 'settings';
+                    moving = false;
                 });
             }
         });
@@ -252,10 +277,39 @@ session_start();
                     $('.current').removeClass('current');
                     $('.debug').fadeIn();
                     $('.debug').addClass('current');
+                    if(!moving)
+                    {
+                        window.history.pushState("debug", "RaiWallet - Debug", "/debug");
+                        document.title = 'RaiWallet - Debug';
+                    }
                     active = 'debug';
+                    moving = false;
                 });
             }
         });
+        
+        window.onpopstate = function(e)
+        {
+            moving = true;
+            switch(e.state)
+            {
+                case 'home':
+                    $('#ghome').click();
+                    break;
+                case 'transactions':
+                    $('#gtxs').click();
+                    break;
+                case 'settings':
+                    $('#gsettings').click();
+                    break;
+                case 'security':
+                    $('#gsecurity').click();
+                    break;
+                case 'debug':
+                    $('#gdebug').click();
+                    break;
+            }
+        }
         
         $(function () {
           $('[data-toggle="tooltip"]').tooltip()
