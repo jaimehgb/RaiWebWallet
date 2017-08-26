@@ -400,6 +400,7 @@ $(document).ready(function(){
 		
 		for(let i in last)
 			addBlockToGui(last[i]);
+		txsOffset = last.length;
 	}
 	
 	function updateReceiveQr(account = null)
@@ -732,6 +733,7 @@ $(document).ready(function(){
 
 			for(let i in last)
 				addBlockToGui(last[i]);
+			txsOffset = last.length;
 
 			lastAction = Date.now() / 1000;
 			autoSignOut();
