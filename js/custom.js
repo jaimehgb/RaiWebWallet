@@ -11,6 +11,7 @@ var txsOffset = 0;
 var bottomReached = false;
 var loadingTxs = false;
 var lastAction = 0;
+var signOutInterval = 30;
 
 var RESOLVE_FORKS_BLOCK_BATCH_SIZE = 20;
 
@@ -819,6 +820,8 @@ $(document).ready(function(){
 					$('#change_alias').fadeOut();
 				}
 				
+				signOutInterval = data.sign_out;
+				$('#aso_time').val(signOutInterval);
 				goToWallet();
 			}
 			else
@@ -1066,6 +1069,22 @@ $(document).ready(function(){
 		return false;
 	});
 	
+	$('.form-autologout').submit(function(event){
+		event.preventDefault();
+		var serialize = $(this).serialize();
+		$.post('ajax.php', 'action=autologout&' + serialize, function(data){
+			data = JSON.parse(data);
+			if(data.status == 'success')
+			{
+				alertSuccess(data.msg);
+				signOutInterval = $('#aso_time').val();
+			}
+			else
+				alertError(data.msg);
+		});
+		return false;
+	});
+	
 	$('#seed_button').click(function(){
 		try{
 			$('#seed_backup').val(wallet.getSeed($('#seed_pass').val()));
@@ -1142,7 +1161,7 @@ $(document).ready(function(){
 	
 	function autoSignOut()
 	{
-		if(Date.now() / 1000 - lastAction > 3600 * 0.5)
+		if(Date.now() / 1000 - lastAction > 60 * signOutInterval)
 			window.location.href = '/out';
 		setTimeout(autoSignOut, 30000);
 	}

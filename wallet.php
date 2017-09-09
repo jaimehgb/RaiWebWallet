@@ -127,12 +127,29 @@
                             <form method="post" class="form-alias">
                                 <div class="form-group">
                                     <label>Alias</label>
-                                    <input type="text" name="alias" id="alias" class="form-control" placeholder="e.g.: johndoe" />
+                                    <input type="text" name="alias" id="alias" class="form-control" placeholder="e.g.: johndoe" autocomplete="off" />
                                 </div>
                                 <div class="form-group">
                                     <button type="submit" id="change_alias" class="btn btn-primary">
                                         Set Alias
                                     </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                    <div class="col-md-12 b-line">
+                        <div class="col-md-12">
+                            <h3>Auto SignOut time</h3>
+                            <p>
+                                By default, you are signed out from your wallet after 30 minutes of inactivity. You can customize that time here.
+                            </p>
+                            <form method="post" class="form-autologout">
+                                <div class="form-group">
+                                    <label>Sign out after: (minutes)</label>
+                                    <input type="text" name="time" id="aso_time" class="form-control" placeholder="e.g.: 10" autocomplete="off" />
+                                </div>
+                                <div class="form-group">
+                                    <input type="submit" name="autologout" class="btn btn-primary" />
                                 </div>
                             </form>
                         </div>
