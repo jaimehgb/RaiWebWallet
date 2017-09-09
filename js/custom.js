@@ -980,7 +980,7 @@ $(document).ready(function(){
 					'<div class="row">'+
 						'<div class="col-sm-2">'+
 							'<span class="blk-type '+type+'">'+block.getType()+'</span><br/>'+
-							'<span class="'+color+' blk-amount">'+symbol+block.getAmount().toFixed(6)+'</span>'+
+							'<span class="'+color+' blk-amount">'+symbol+''+(block.getAmount() / 1000000).toFixed(6)+'</span>'+
 						'</div>'+
 						'<div class="col-sm-6">'+
 							'<a href="https://raiblockscommunity.net/block/index.php?h='+block.getHash(true)+'" target="_blank"><span class="blk-hash"> '+block.getHash(true)+'</span></a><br/>'+
