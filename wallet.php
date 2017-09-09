@@ -117,6 +117,26 @@
                             </form>
                         </div>
                     </div>
+                    <div class="col-md-12 b-line">
+                        <div class="col-md-12">
+                            <h3>Change Alias</h3>
+                            <p>
+                                You can set an alias to login without having to copy the hex identifier every single time :P <br/>
+                                Once set it cannot be changed.
+                            </p>
+                            <form method="post" class="form-alias">
+                                <div class="form-group">
+                                    <label>Alias</label>
+                                    <input type="text" name="alias" id="alias" class="form-control" placeholder="e.g.: johndoe" />
+                                </div>
+                                <div class="form-group">
+                                    <button type="submit" id="change_alias" class="btn btn-primary">
+                                        Set Alias
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
                 </div>
                 
                 <!-- Security -->

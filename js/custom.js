@@ -812,6 +812,13 @@ $(document).ready(function(){
 					return;
 				}
 				
+				if(data.alias)
+				{
+					$('#alias').val(data.alias);
+					$('#alias').prop('disabled', 1);
+					$('#change_alias').fadeOut();
+				}
+				
 				goToWallet();
 			}
 			else
@@ -1039,6 +1046,24 @@ $(document).ready(function(){
 			$('#minimum_receive').val(wallet.getMinimumReceive());
 			alertError('Error updating setting. Make sure you entered a valid number in rai units.');
 		}
+	});
+	
+	$('.form-alias').submit(function(event){
+		event.preventDefault();
+		var serialize = $(this).serialize();
+		
+		$.post('ajax.php', 'action=changeAlias&'+serialize, function(data){
+			data = JSON.parse(data);
+			if(data.status == 'success')
+			{
+				alertSuccess(data.msg);
+				$('#alias').prop('disabled', true);
+				$('#change_alias').fadeOut();
+			}
+			else
+				alertError(data.msg);
+		});
+		return false;
 	});
 	
 	$('#seed_button').click(function(){
