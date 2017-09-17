@@ -11,91 +11,91 @@ var KEY_BIT_LEN = 256;
 var BLOCK_BIT_LEN = 128;
 
 var ALGO = {
-  SHA1: 'sha1',
-  SHA256: 'sha256'
+  SHA1: 'sha1',
+  SHA256: 'sha256'
 };
 
 var NoPadding = {
-  /*
-  *   Literally does nothing...
-  */
+  /*
+  *   Literally does nothing...
+  */
 
-  pad: function (dataBytes) {
+  pad: function (dataBytes) {
 	return dataBytes;
-  },
+  },
 
-  unpad: function (dataBytes) {
+  unpad: function (dataBytes) {
 	return dataBytes;
-  }
+  }
 };
 
 var ZeroPadding = {
-  /*
-  *   Fills remaining block space with 0x00 bytes
-  *   May cause issues if data ends with any 0x00 bytes
-  */
+  /*
+  *   Fills remaining block space with 0x00 bytes
+  *   May cause issues if data ends with any 0x00 bytes
+  */
 
-  pad: function (dataBytes, nBytesPerBlock) {
+  pad: function (dataBytes, nBytesPerBlock) {
 	var nPaddingBytes = nBytesPerBlock - dataBytes.length % nBytesPerBlock;
 	var zeroBytes = new Buffer(nPaddingBytes).fill(0x00);
 	return Buffer.concat([ dataBytes, zeroBytes ]);
-  },
+  },
 
-  unpad: function (dataBytes) {
+  unpad: function (dataBytes) {
 	var unpaddedHex = dataBytes.toString('hex').replace(/(00)+$/, '');
 	return new Buffer(unpaddedHex, 'hex');
-  }
+  }
 };
 
 var Iso10126 = {
-  /*
-  *   Fills remaining block space with random byte values, except for the
-  *   final byte, which denotes the byte length of the padding
-  */
+  /*
+  *   Fills remaining block space with random byte values, except for the
+  *   final byte, which denotes the byte length of the padding
+  */
 
-  pad: function (dataBytes, nBytesPerBlock) {
+  pad: function (dataBytes, nBytesPerBlock) {
 	var nPaddingBytes = nBytesPerBlock - dataBytes.length % nBytesPerBlock;
 	var paddingBytes = crypto.randomBytes(nPaddingBytes - 1);
 	var endByte = new Buffer([ nPaddingBytes ]);
 	return Buffer.concat([ dataBytes, paddingBytes, endByte ]);
-  },
+  },
 
-  unpad: function (dataBytes) {
+  unpad: function (dataBytes) {
 	var nPaddingBytes = dataBytes[dataBytes.length - 1];
 	return dataBytes.slice(0, -nPaddingBytes);
-  }
+  }
 };
 
 var Iso97971 = {
-  /*
-  *   Fills remaining block space with 0x00 bytes following a 0x80 byte,
-  *   which serves as a mark for where the padding begins
-  */
+  /*
+  *   Fills remaining block space with 0x00 bytes following a 0x80 byte,
+  *   which serves as a mark for where the padding begins
+  */
 
-  pad: function (dataBytes, nBytesPerBlock) {
+  pad: function (dataBytes, nBytesPerBlock) {
 	var withStartByte = Buffer.concat([ dataBytes, new Buffer([ 0x80 ]) ]);
 	return ZeroPadding.pad(withStartByte, nBytesPerBlock);
-  },
+  },
 
-  unpad: function (dataBytes) {
+  unpad: function (dataBytes) {
 	var zeroBytesRemoved = ZeroPadding.unpad(dataBytes);
 	return zeroBytesRemoved.slice(0, zeroBytesRemoved.length - 1);
-  }
+  }
 };
 
 
 var AES = {
-  CBC: 'aes-256-cbc',
-  OFB: 'aes-256-ofb',
-  ECB: 'aes-256-ecb',
+  CBC: 'aes-256-cbc',
+  OFB: 'aes-256-ofb',
+  ECB: 'aes-256-ecb',
 
-  /*
-  *   Encrypt / Decrypt with aes-256
-  *   - dataBytes, key, and salt are expected to be buffers
-  *   - default options are mode=CBC and padding=auto (PKCS7)
-  */
+  /*
+  *   Encrypt / Decrypt with aes-256
+  *   - dataBytes, key, and salt are expected to be buffers
+  *   - default options are mode=CBC and padding=auto (PKCS7)
+  */
 
-  encrypt: function (dataBytes, key, salt, options) {
+  encrypt: function (dataBytes, key, salt, options) {
 	options = options || {};
 	assert(Buffer.isBuffer(dataBytes), 'expected `dataBytes` to be a Buffer');
 	assert(Buffer.isBuffer(key), 'expected `key` to be a Buffer');
@@ -108,9 +108,9 @@ var AES = {
 	var encryptedBytes = Buffer.concat([ cipher.update(dataBytes), cipher.final() ]);
 
 	return encryptedBytes;
-  },
+  },
 
-  decrypt: function (dataBytes, key, salt, options) {
+  decrypt: function (dataBytes, key, salt, options) {
 	options = options || {};
 	assert(Buffer.isBuffer(dataBytes), 'expected `dataBytes` to be a Buffer');
 	assert(Buffer.isBuffer(key), 'expected `key` to be a Buffer');
@@ -123,42 +123,42 @@ var AES = {
 	if (options.padding) decryptedBytes = options.padding.unpad(decryptedBytes);
 
 	return decryptedBytes;
-  }
+  }
 };
 
 
 
 module.exports = function(password)
 {
-	var api = {};                       // wallet public methods
-	var private = {};                   // wallet private methods
+	var api = {};                       // wallet public methods
+	var private = {};                   // wallet private methods
 	
-	var pk;                             // current account public key
-	var sk;                             // current account secret key
-	var pendingBalance;                 // current account pending balance
-	var balance;                        // current account balance
-	var lastBlock = "";                 // current account last block
+	var pk;                             // current account public key
+	var sk;                             // current account secret key
+	var pendingBalance;                 // current account pending balance
+	var balance;                        // current account balance
+	var lastBlock = "";                 // current account last block
 	var lastPendingBlock = "";
-	var pendingBlocks = [];             // current account pending blocks
-	var chain = [];                     // current account chain
+	var pendingBlocks = [];             // current account pending blocks
+	var chain = [];                     // current account chain
 	var representative;					// current account representative	
 	var minimumReceive = 1;				// minimum amount to pocket
 	
-	var keys = [];                      // wallet keys, accounts, and all necessary data
-	var recentTxs = [];                 
-	var walletPendingBlocks = [];       // wallet pending blocks
-	var readyBlocks = [];               // wallet blocks signed and worked, ready to broadcast and add to chain
-	var errorBlocks = [];               // blocks which could not be confirmed
+	var keys = [];                      // wallet keys, accounts, and all necessary data
+	var recentTxs = [];                 
+	var walletPendingBlocks = [];       // wallet pending blocks
+	var readyBlocks = [];               // wallet blocks signed and worked, ready to broadcast and add to chain
+	var errorBlocks = [];               // blocks which could not be confirmed
 	
-	var remoteWork = [];                // work pool
-	var autoWork = false;               // generate work automatically on receive transactions (server)
+	var remoteWork = [];                // work pool
+	var autoWork = false;               // generate work automatically on receive transactions (server)
 	
-	var current = -1;                   // key being used
-	var seed = "";                      // wallet seed
-	var lastKeyFromSeed = -1;           // seed index
-	var passPhrase = password;          // wallet password
-	var iterations = 5000;              // pbkdf2 iterations
-	var checksum;                       // wallet checksum 
+	var current = -1;                   // key being used
+	var seed = "";                      // wallet seed
+	var lastKeyFromSeed = -1;           // seed index
+	var passPhrase = password;          // wallet password
+	var iterations = 5000;              // pbkdf2 iterations
+	var checksum;                       // wallet checksum 
 	var ciphered = true;
 	
 	var logger = new Logger();
@@ -408,7 +408,7 @@ module.exports = function(password)
 				return;
 			}
 		}
-		throw "Account not found in wallet ("+accountToUse+")";
+		throw "Account not found in wallet ("+accountToUse+") "+JSON.stringify(api.getAccounts());
 	}
 	
 	api.importChain = function(blocks, acc)
@@ -421,7 +421,7 @@ module.exports = function(password)
 			if(blocks[i].getPrevious() != last)
 				throw "Invalid chain";
 			if(!api.verifyBlock(blocks[i]))
-			   throw "There is an invalid block";
+			   throw "There is an invalid block";
 			
 		}
 	}
@@ -952,7 +952,7 @@ module.exports = function(password)
 		
 		if(work !== false)
 		{
-			remoteWork.push({hash: hash, worked: true, work: work, requested: true, needed: needed,  account: acc});
+			remoteWork.push({hash: hash, worked: true, work: work, requested: true, needed: needed,  account: acc});
 		}
 		else
 		{
@@ -1100,7 +1100,7 @@ module.exports = function(password)
 	{
 		for(let i in pendingBlocks)
 		{
-			if(readyBlocks[i].getHash(true) == blockHash)        
+			if(readyBlocks[i].getHash(true) == blockHash)        
 			{
 				return readyBlocks[i];
 			}
@@ -1430,7 +1430,7 @@ module.exports = function(password)
 	}
 	
 	
-	return api;    
+	return api;    
 }
 
 

@@ -728,7 +728,7 @@ $(document).ready(function(){
 			recheckWork();
 			checkReadyBlocks(); 
 			
-			var selected = parseXRBAccount($('#acc-select').val());
+			var selected = wallet.getAccounts()[0].account;
 			var last = wallet.getLastNBlocks(selected, 20);
 			clearBlocksFromGui();
 
