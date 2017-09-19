@@ -756,6 +756,12 @@ $(document).ready(function(){
 		// check pass
 		if($('#psw').val() == $('#psw2').val())
 		{
+			if($('#psw').val().length < 8)
+			{
+				alertError("You are going to store money, choose a stronger password :P");
+				return false;
+			}
+			
 			// create wallet and send to server
 			wallet = new RaiWallet($('#psw').val());
 			wallet.setLogger(logger);
