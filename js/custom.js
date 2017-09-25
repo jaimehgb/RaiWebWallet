@@ -811,11 +811,12 @@ $(document).ready(function(){
 		
 	});
 	
-	$('.form-login').submit(function(){
-		var serialize = $(this).serialize();
+	$('.form-login').submit(function(e){
+		e.preventDefault();
+		var wid = $('#wid').val();
 		
 		$('input').prop('disabled', true);
-		$.post('ajax.php', 'action=login&'+serialize, function(data){
+		$.post('ajax.php', 'action=login&wallet_id='+wid, function(data){
 			data = JSON.parse(data);
 			
 			if(data.status == 'success')
