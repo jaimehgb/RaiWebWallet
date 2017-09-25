@@ -737,7 +737,8 @@ module.exports = function(password)
 			
 		for(let i = 0; i < keys.length; i++)
 		{
-			for(let j = chain.length - 1; j > 0; j--)
+			api.useAccount(keys[i].account);
+			for(let j = chain.length - 1; j >= 0; j--)
 			{
 				var blk = chain[j];
 				if(blk.getHash(true) == blockHash)
@@ -747,7 +748,7 @@ module.exports = function(password)
 				break;
 			api.useAccount(keys[i + 1].account);
 		}
-		
+		return false;
 	}
 	
 	api.addBlockToReadyBlocks = function(blk)

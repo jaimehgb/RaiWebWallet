@@ -376,7 +376,17 @@ $(document).ready(function(){
 	
 	function rebroadcastBlock(blockHash)
 	{
-		wallet.addBlockToReadyBlocks(wallet.getBlockFromHash(blockHash));
+		$.post('ajax.php', 'action=rebroadcast&hash='+blockHash, function(data){
+			data = JSON.parse(data);
+			if(data.status == 'success')
+			{
+				alertInfo('Block rebroadcated');
+			}
+			else
+			{
+				alertError(data.msg);
+			}
+		});
 	}
 	
 	function updateAccountGUI(acc)
@@ -554,15 +564,20 @@ $(document).ready(function(){
 		var accs = wallet.getAccounts();
 		var lastHashes = {};
 		var forks = [];
+		var emptyAccounts = [];
 		for(let i in accs)
 		{
 			let blk = wallet.getLastNBlocks(accs[i].account, 1);
 			if(blk.length == 0)
+			{
+				emptyAccounts.push(accs[i].account);
 				continue;
+			}
 			lastHashes[accs[i].account] = blk[0].getHash(true);
 		}
 		lastHashes = JSON.stringify(lastHashes);
-		$.post('ajax.php', 'action=checkChains&hashes='+lastHashes, function(data){
+		var emptyAccountsJSON = JSON.stringify(emptyAccounts);
+		$.post('ajax.php', 'action=checkChains&hashes='+lastHashes+'&emptyAccounts='+emptyAccountsJSON, function(data){
 			data = JSON.parse(data);
 			if(data.status == 'success')
 			{
@@ -576,8 +591,8 @@ $(document).ready(function(){
 							// not forked, but there are new blocks
 							for(let j in data.unsynced[i].blocks)
 							{
-								if(j == 0)
-									continue; // first block is already confirmed
+								if(j == 0 && emptyAccounts.indexOf(acc) == -1)
+									continue; // first block is already confirmed, unless its missing too :P
 								var blk = new Block();
 								blk.buildFromJSON(data.unsynced[i].blocks[j].block); 
 								if(blk.getType() == 'receive' || blk.getType() == 'open')
