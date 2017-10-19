@@ -335,7 +335,7 @@ session_start();
     <script src="node_modules/tweetnacl/nacl.js"></script>
     <script type="text/javascript" src="functions.js"></script>
     <script type="text/javascript" src="Logger.js"></script>
-    <script src="main.js?v=1.0.1"></script>
+    <script src="main.js?v=1.0.2"></script>
 
 </body>
 

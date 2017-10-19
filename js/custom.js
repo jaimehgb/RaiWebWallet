@@ -214,7 +214,7 @@ $(document).ready(function(){
 								'<div class="col-xs-3">'+
 									'<b class="green">Received</b>'+
 								'</div>'+
-								'<div class="col-xs-4"><a href="https://raiblockscommunity.net/block/index.php?h='+txObj.hash+'" target="_blank">'+txObj.hash.substring(0,20)+'....</a></div>'+
+								'<div class="col-xs-4"><a href="https://raiblocks.net/block/index.php?h='+txObj.hash+'" target="_blank">'+txObj.hash.substring(0,20)+'....</a></div>'+
 								'<div class="col-xs-5 text-right">'+
 									'<span class="green">'+(txObj.amount / 1000000).toFixed(8)+'</span> XRB'+
 								'</div>'+
@@ -1005,7 +1005,7 @@ $(document).ready(function(){
 							'<span class="'+color+' blk-amount">'+symbol+''+(block.getAmount() / 1000000).toFixed(6)+'</span>'+
 						'</div>'+
 						'<div class="col-sm-6">'+
-							'<a href="https://raiblockscommunity.net/block/index.php?h='+block.getHash(true)+'" target="_blank"><span class="blk-hash"> '+block.getHash(true)+'</span></a><br/>'+
+							'<a href="https://raiblocks.net/block/index.php?h='+block.getHash(true)+'" target="_blank"><span class="blk-hash"> '+block.getHash(true)+'</span></a><br/>'+
 							'<b>'+fromto+'</b><span class="blk-account">'+account+'</span>'+
 						'</div>'+
 						'<div class="col-sm-4 text-center">'+
@@ -1029,7 +1029,7 @@ $(document).ready(function(){
 							'<span class="blk-type '+type+'">'+block.getType()+'</span>'+
 						'</div>'+
 						'<div class="col-sm-6">'+
-							'<a href="https://raiblockscommunity.net/block/index.php?h='+block.getHash(true)+'" target="_blank"><span class="blk-hash"> '+block.getHash(true)+'</span></a><br/>'+
+							'<a href="https://raiblocks.net/block/index.php?h='+block.getHash(true)+'" target="_blank"><span class="blk-hash"> '+block.getHash(true)+'</span></a><br/>'+
 							'<span class="blk-account">'+block.getRepresentative()+'</span>'+
 						'</div>'+
 						'<div class="col-sm-4 text-center">'+
