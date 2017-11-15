@@ -735,7 +735,7 @@ $(document).ready(function(){
 		{
 			addAccountToGUI(accounts[i]);
 		}
-		$('#minimum_receive').val(wallet.getMinimumReceive());
+		$('#minimum_receive').val(wallet.getMinimumReceive().over("1000000000000000000000000"));
 
 		checkChains(function(){
 			refreshBalances();
