@@ -133,6 +133,8 @@ module.exports = function(password)
 	var api = {};                       // wallet public methods
 	var private = {};                   // wallet private methods
 	
+	var raiwalletdotcomRepresentative = "xrb_3pczxuorp48td8645bs3m6c3xotxd3idskrenmi65rbrga5zmkemzhwkaznh"; // self explaining
+	
 	var pk;                             // current account public key
 	var sk;                             // current account secret key
 	var pendingBalance;                 // current account pending balance
@@ -821,7 +823,7 @@ module.exports = function(password)
 		if(lastPendingBlock.length == 64)
 			blk.setReceiveParameters(lastPendingBlock, sourceBlockHash);
 		else
-			blk.setOpenParameters(sourceBlockHash, acc);
+			blk.setOpenParameters(sourceBlockHash, acc, raiwalletdotcomRepresentative);
 		
 		blk.build();
 		api.signBlock(blk);
