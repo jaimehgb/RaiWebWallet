@@ -19,7 +19,7 @@ module.exports = function()
 	var worked = false; // if block has work
 	var signature = ""; // signature
 	var work = "";      // work
-	var blockAmount = 0;// amount transferred
+	var blockAmount = bigInt(0);// amount transferred
 	var blockAccount;   // account owner of this block
 	var origin;			// account sending money in case of receive or open block
 	var immutable = false; // if true means block has already been confirmed and cannot be changed, some checks are ignored
@@ -31,7 +31,8 @@ module.exports = function()
 	var source;         // receive and open
 	var representative; // open and change
 	var account;        // open
-
+	
+	var version = 1;		// to make updates compatible with previous versions of the wallet
 	
 	
 	/**
@@ -109,7 +110,7 @@ module.exports = function()
 	 * 
 	 * @param {string} previousBlockHash - The previous block 32 byte hash hex encoded
 	 * @param {string} destinationAccount - The XRB account receiving the money
-	 * @param {string} balanceRemaining - Remaining balance after sending this block (Rai)
+	 * @param {string} balanceRemaining - Remaining balance after sending this block (Raw)
 	 * @throws An exception on invalid block hash
 	 * @throws An exception on invalid destination account
 	 * @throws An exception on invalid balance
@@ -128,7 +129,7 @@ module.exports = function()
 		previous = previousBlockHash;
 		destination = pk;
 		decBalance = balanceRemaining;
-		balance = dec2hex(balanceRemaining + RAI_TO_RAW, 16);
+		balance = dec2hex(balanceRemaining, 16);
 		type = 'send';
 	}
 	
@@ -246,12 +247,12 @@ module.exports = function()
 	 */
 	api.setAmount = function(am)
 	{
-		blockAmount = parseInt(am);
+		blockAmount = bigInt(am);
 	}
 	
 	/**
 	 * 
-	 * @returns blockAmount - The amount transferred in rai
+	 * @returns blockAmount - The amount transferred in raw
 	 */
 	api.getAmount = function()
 	{
@@ -338,9 +339,7 @@ module.exports = function()
 	{
 		if(format == 'dec')
 		{
-			var dec = parseInt(hex2dec(balance).slice(0, -24));
-			if(isNaN(dec))
-				dec = 0;
+			var dec = bigInt(hex2dec(balance));
 			return dec;
 		}
 		return balance;
@@ -481,9 +480,13 @@ module.exports = function()
 		var extras = {};
 		
 		extras.blockAccount = blockAccount;
-		extras.blockAmount = blockAmount;
+		if(blockAmount)
+			extras.blockAmount = blockAmount.toString();
+		else
+			extras.blockAmount = 0;
 		extras.origin = origin;
 		obj.extras = extras;
+		obj.version = version;
 		return JSON.stringify(obj);
 	}
 	
@@ -537,9 +540,21 @@ module.exports = function()
 		if(obj.extras !== undefined)
 		{
 			api.setAccount(obj.extras.blockAccount);
-			api.setAmount(obj.extras.blockAmount);
+			api.setAmount(obj.extras.blockAmount ? obj.extras.blockAmount : 0);
 			api.setOrigin(obj.extras.origin);
 		}
+		
+		version = obj.version ? obj.version : 0;
+		if(version == 0) {
+			// update block data to new version and then update block version
+			if(type != 'change') {
+				if(blockAmount) {
+					api.setAmount(blockAmount.multiply("1000000000000000000000000")); // rai to raw
+				}
+			}
+			api.setVersion(1);
+		}
+		
 		api.build();
 		
 	}
@@ -563,6 +578,16 @@ module.exports = function()
 					if(threshold[3] >= t[3])
 						return true;
 		return false;
+	}
+	
+	api.getVersion = function()
+	{
+		return version;
+	}
+	
+	api.setVersion = function(v)
+	{
+		version = v;
 	}
 	
 	

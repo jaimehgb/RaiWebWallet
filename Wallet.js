@@ -231,14 +231,12 @@ module.exports = function(password)
 		iterations = newIterationNumber;
 	}
 	
-	api.setMinimumReceive = function(rai_amount)
+	api.setMinimumReceive = function(raw_amount)
 	{
-		rai_amount = parseInt(rai_amount);
-		if(rai_amount < 0)
+		raw_amount = bigInt(raw_amount);
+		if(raw_amount.lesser(0))
 			return false;
-		if(isNaN(rai_amount))
-			return false;
-		minimumReceive = rai_amount;
+		minimumReceive = raw_amount;
 		return true;
 	}
 	
@@ -327,8 +325,8 @@ module.exports = function(password)
 				priv: hex_uint8(hex),
 				pub: nacl.sign.keyPair.fromSecretKey(hex_uint8(hex)).publicKey,
 				account: accountFromHexKey(uint8_hex(nacl.sign.keyPair.fromSecretKey(hex_uint8(hex)).publicKey)), 
-				balance: 0, 
-				pendingBalance: 0,
+				balance: bigInt(0), 
+				pendingBalance: bigInt(0),
 				lastBlock: "",
 				lastPendingBlock: "",
 				subscribed: false,
@@ -365,8 +363,8 @@ module.exports = function(password)
 		{
 			accounts.push({
 				account: keys[i].account,
-				balance: keys[i].balance, 
-				pendingBalance: keys[i].pendingBalance,
+				balance: bigInt(keys[i].balance), 
+				pendingBalance: bigInt(keys[i].pendingBalance),
 				label: keys[i].label
 			});
 		}
@@ -514,12 +512,11 @@ module.exports = function(password)
 	api.getPendingBalance = function()
 	{
 		//return pendingBalance ? pendingBalance : keys[current].pendingBalance;
-		var am = 0;
+		var am = bigInt(0);
 		for(let i in pendingBlocks)
 		{
 			if(pendingBlocks[i].getType() == 'open' || pendingBlocks[i].getType() == 'receive')
-				if(!isNaN(pendingBlocks[i].getAmount()))
-					am += pendingBlocks[i].getAmount();
+					am = am.add(pendingBlocks[i].getAmount());
 		}
 		return am;
 	}
@@ -545,14 +542,14 @@ module.exports = function(password)
 	 */
 	private.setBalance = function(newBalance)
 	{
-		balance = parseInt(newBalance);
-		keys[current].balance = parseInt(newBalance);
+		balance = bigInt(newBalance);
+		keys[current].balance = balance;
 	}
 	
 	private.setPendingBalance = function(newBalance)
 	{
-		pendingBalance = parseInt(newBalance);
-		keys[current].pendingBalance = parseInt(newBalance);
+		pendingBalance = bigInt(newBalance);
+		keys[current].pendingBalance = pendingBalance;
 	}
 	
 	api.getAccountBalance = function(acc)
@@ -563,32 +560,24 @@ module.exports = function(password)
 	
 	api.getWalletPendingBalance = function()
 	{
-		var pending = 0;
+		var pending = bigInt(0);
 		for(let i in walletPendingBlocks)
 		{
 			if(walletPendingBlocks[i].getType() == 'open' || walletPendingBlocks[i].getType() == 'receive')
-				pending += parseInt(walletPendingBlocks[i].getAmount());
+				pending = pending.add(walletPendingBlocks[i].getAmount());
 		}
 		return pending;
 	}
 	
 	api.getWalletBalance = function()
 	{
-		var bal = 0;
+		var bal = bigInt(0);
 		var temp;
-		var recalc = false;
 		for(let i in keys)
 		{
-			temp = parseInt(keys[i].balance);
-			if(isNaN(temp))
-			{
-				recalc = true;
-				temp = 0;
-			}
-			bal += temp;
+			temp = keys[i].balance;
+			bal = bal.add(temp);
 		}
-		if(recalc)
-			api.recalculateWalletBalances();
 		return bal;
 	}
 	
@@ -606,12 +595,9 @@ module.exports = function(password)
 		if(chain.length <= 0)
 			return 0;
 		
-		var sum = 0;
+		var sum = bigInt(0);
 		var found = blockHash === 0 ? true : false;
 		var blk;
-		
-		if(blockHash === 0)
-			found = true;
 		
 		// check pending blocks first
 		for(let i = pendingBlocks.length - 1; i >= 0; i--)
@@ -625,11 +611,11 @@ module.exports = function(password)
 			{
 				if(blk.getType() == 'open' || blk.getType() == 'receive')
 				{
-					sum += blk.getAmount();
+					sum = sum.add(blk.getAmount());
 				}
 				else if(blk.getType() == 'send')
 				{
-					sum += blk.getBalance();
+					sum = sum.add(blk.getBalance());
 					break;
 				}
 			}
@@ -646,11 +632,11 @@ module.exports = function(password)
 			{
 				if(blk.getType() == 'open' || blk.getType() == 'receive')
 				{
-					sum += blk.getAmount();
+					sum = sum.add(blk.getAmount());
 				}
 				else if(blk.getType() == 'send')
 				{
-					sum += blk.getBalance();
+					sum = sum.add(blk.getBalance());
 					break;
 				}
 			}
@@ -661,7 +647,7 @@ module.exports = function(password)
 	/**
 	 * Updates an account balance
 	 * 
-	 * @param {number} - The new balance in rai units
+	 * @param {number} - The new balance in raw units
 	 * @param {string} Account - The account whose balance is being updated
 	 */
 	private.setAccountBalance = function(newBalance, acc)
@@ -676,7 +662,7 @@ module.exports = function(password)
 	{
 		var temp = current;
 		api.useAccount(acc);
-		private.setPendingBalance(parseInt(api.getPendingBalance()) + parseInt(amount));
+		private.setPendingBalance(api.getPendingBalance().sum(amount));
 		api.useAccount(keys[temp].account);
 	}
 	
@@ -760,9 +746,10 @@ module.exports = function(password)
 	api.addPendingSendBlock = function(from, to, amount = 0)
 	{
 		api.useAccount(from);
+		amount = bigInt(amount);
 		
 		var bal = api.getBalanceUpToBlock(0);
-		var remaining = parseInt(bal) - parseInt(amount);
+		var remaining = bal.minus(amount);
 		var blk = new Block();
 		
 		blk.setSendParameters(lastPendingBlock, to, remaining);
@@ -803,9 +790,9 @@ module.exports = function(password)
 	
 	api.addPendingReceiveBlock = function(sourceBlockHash, acc, from, amount = 0)
 	{
+		amount = bigInt(amount);
 		api.useAccount(acc);
-		
-		if(amount < minimumReceive)
+		if(amount.lesser(minimumReceive))
 		{
 			logger.log("Receive block rejected due to minimum receive amount (" + sourceBlockHash + ")");
 			return false;
@@ -846,7 +833,7 @@ module.exports = function(password)
 		keys[current].lastPendingBlock = lastPendingBlock;
 		pendingBlocks.push(blk);
 		walletPendingBlocks.push(blk);
-		private.setPendingBalance(parseInt(api.getPendingBalance()) + parseInt(amount));
+		private.setPendingBalance(api.getPendingBalance().add(amount));
 		private.save();
 		
 		// check if we have received work already
@@ -1147,8 +1134,8 @@ module.exports = function(password)
 					chain.push(blk);
 					readyBlocks.push(blk);
 					api.removePendingBlock(blockHash);
-					private.setPendingBalance(parseInt(api.getPendingBalance()) - parseInt(blk.getAmount()));
-					private.setBalance(parseInt(api.getBalance()) + parseInt(blk.getAmount()));
+					private.setPendingBalance(api.getPendingBalance().minus(blk.getAmount()));
+					private.setBalance(api.getBalance().add(blk.getAmount()));
 					private.save();
 				}
 				else
@@ -1157,8 +1144,8 @@ module.exports = function(password)
 					{
 						if(blk.getType() == 'receive')
 						{
-							private.setPendingBalance(parseInt(api.getPendingBalance()) - parseInt(blk.getAmount()));
-							private.setBalance(parseInt(api.getBalance()) + parseInt(blk.getAmount()));
+							private.setPendingBalance(api.getPendingBalance().minus(blk.getAmount()));
+							private.setBalance(api.getBalance().add(blk.getAmount()));
 						}
 						else if(blk.getType() == 'send')
 						{
@@ -1166,11 +1153,11 @@ module.exports = function(password)
 							var real = api.getBalanceUpToBlock(blk.getPrevious());
 							if(blk.isImmutable())
 							{
-								blk.setAmount(real - blk.getBalance('dec'));
+								blk.setAmount(real.minus(blk.getBalance('dec')));
 							}
-							else if(real - blk.getBalance('dec') != blk.getAmount())
+							else if(real.minus(blk.getBalance('dec')).neq(blk.getAmount()))
 							{
-								logger.error('Sending incorrect amount ('+blk.getAmount()+') (' + (real - blk.getBalance('dec') ) +')' );
+								logger.error('Sending incorrect amount ('+blk.getAmount().toString()+') (' + (real.minus(blk.getBalance('dec')).toString() ) +')' );
 								api.recalculateWalletBalances();
 								throw "Incorrect send amount.";
 							}
@@ -1301,8 +1288,8 @@ module.exports = function(password)
 			aux.priv = uint8_hex(keys[i].priv);
 			aux.pub = uint8_hex(keys[i].pub);
 			aux.account = keys[i].account;
-			aux.balance = keys[i].balance;
-			aux.pendingBalance = keys[i].pendingBalance;
+			aux.balance = keys[i].balance.toString();
+			aux.pendingBalance = keys[i].pendingBalance.toString();
 			aux.lastBlock = keys[i].lastBlock;
 			aux.pendingBlocks = [];
 			aux.chain = [];
@@ -1327,7 +1314,7 @@ module.exports = function(password)
 		pack.recent = recentTxs;
 		pack.remoteWork = remoteWork;
 		pack.autoWork = autoWork;
-		pack.minimumReceive = minimumReceive;
+		pack.minimumReceive = minimumReceive.toString();
 		
 		pack = JSON.stringify(pack);
 		pack = stringToHex(pack);
@@ -1380,7 +1367,7 @@ module.exports = function(password)
 		remoteWork = [];
 		autoWork = walletData.autoWork;
 		readyBlocks = [];
-		minimumReceive = walletData.minimumReceive != undefined ? parseInt(walletData.minimumReceive) : 1;
+		minimumReceive = walletData.minimumReceive != undefined ? bigInt(walletData.minimumReceive) : bigInt("1000000000000000000000000");
 		
 		for(let i in walletData.readyBlocks)
 		{
@@ -1404,10 +1391,10 @@ module.exports = function(password)
 			aux.priv = hex_uint8(walletData.keys[i].priv);
 			aux.pub = hex_uint8(walletData.keys[i].pub);
 			aux.account = walletData.keys[i].account;
-			aux.balance = walletData.keys[i].balance ? walletData.keys[i].balance : 0;
+			aux.balance = bigInt(walletData.keys[i].balance ? walletData.keys[i].balance : 0);
 			aux.lastBlock = aux.chain.length > 0 ? aux.chain[aux.chain.length - 1].getHash(true) : "";
 			aux.lastPendingBlock = aux.lastBlock;
-			aux.pendingBalance = walletData.keys[i].pendingBalance ? walletData.keys[i].pendingBalance : 0;
+			aux.pendingBalance = bigInt(walletData.keys[i].pendingBalance ? walletData.keys[i].pendingBalance : 0);
 			aux.pendingBlocks = [];
 			aux.representative = walletData.keys[i].representative != undefined ? walletData.keys[i].representative : aux.account;
 			aux.label = walletData.keys[i].label != undefined ? walletData.keys[i].label : "";

@@ -216,7 +216,7 @@ $(document).ready(function(){
 								'</div>'+
 								'<div class="col-xs-4"><a href="https://raiblocks.net/block/index.php?h='+txObj.hash+'" target="_blank">'+txObj.hash.substring(0,20)+'....</a></div>'+
 								'<div class="col-xs-5 text-right">'+
-									'<span class="green">'+(txObj.amount / 1000000).toFixed(8)+'</span> XRB'+
+									'<span class="green">'+(txObj.amount.over("1000000000000000000000000").toJSNumber() / 1000000).toFixed(8)+'</span> XRB'+
 								'</div>'+
 							'</div></li></ul>');
 	}
@@ -241,7 +241,7 @@ $(document).ready(function(){
 								'</div>'+
 								'<div class="col-xs-3">'+txObj.date+'</div>'+
 								'<div class="col-xs-6 text-right">'+
-									'<span class="red">'+(txObj.amount / 1000000).toFixed(8)+'</span> XRB'+
+									'<span class="red">'+(txObj.amount.over("1000000000000000000000000").toJSNumber() / 1000000).toFixed(8)+'</span> XRB'+
 								'</div>'+
 							'</div></li></ul>');
 	}
@@ -270,8 +270,8 @@ $(document).ready(function(){
 		var balance = wallet.getWalletBalance();
 		var pending = wallet.getWalletPendingBalance();
 		
-		$('#pending').html((pending / 1000000).toFixed(6));
-		$('#balance').html((balance / 1000000).toFixed(6));
+		$('#pending').html((pending.over("1000000000000000000000000").toJSNumber() / 1000000).toFixed(6));
+		$('#balance').html((balance.over("1000000000000000000000000").toJSNumber() / 1000000).toFixed(6));
 		
 		var accs = wallet.getAccounts();
 		for(let i in accs)
@@ -280,9 +280,9 @@ $(document).ready(function(){
 			var bal = accs[i].balance;
 			var label = accs[i].label;
 			if(label == "")
-				$('select').find('.acc_select_'+acc).html(acc+' ('+(bal / 1000000).toFixed(6)+' XRB)');
+				$('select').find('.acc_select_'+acc).html(acc+' ('+(bal.over("1000000000000000000000000").toJSNumber() / 1000000).toFixed(6)+' XRB)');
 			else
-				$('select').find('.acc_select_'+acc).html('('+label+') - '+acc+' ('+(bal / 1000000).toFixed(6)+' XRB)');
+				$('select').find('.acc_select_'+acc).html('('+label+') - '+acc+' ('+(bal.over("1000000000000000000000000").toJSNumber() / 1000000).toFixed(6)+' XRB)');
 		}
 	}
 	
@@ -394,7 +394,7 @@ $(document).ready(function(){
 		refreshChain();
 		
 		// update account balance on send and receive modals
-		var balance = wallet.getAccountBalance(acc);
+		var balance = wallet.getAccountBalance(acc).over("1000000000000000000000000").toJSNumber();
 		$('#sendbalance_'+acc).html(balance);
 		$('#receivebalance_'+acc).html(balance);
 	}
@@ -470,7 +470,7 @@ $(document).ready(function(){
 						var blk = data.res[account].blocks[i];
 						if(wallet.addPendingReceiveBlock(blk.hash, account, blk.from, blk.amount))
 						{
-							var txObj = {account: account, amount: blk.amount, date: blk.from, hash: blk.hash}
+							var txObj = {account: account, amount: bigInt(blk.amount), date: blk.from, hash: blk.hash}
 							addRecentRecToGui(txObj);
 						}
 					}
@@ -883,6 +883,7 @@ $(document).ready(function(){
 		
 		var amount = parseFloat($('#samount').val());
 		var amountRai = parseInt(amount * 1000000);
+		var amountRaw = bigInt(amountRai).multiply("1000000000000000000000000");
 		if(amount <= 0)
 		{
 			alertError('Invalid amount.');
@@ -890,7 +891,7 @@ $(document).ready(function(){
 			error = true;
 		}
 		
-		if(amountRai > balance)
+		if(amountRaw.greater(balance))
 		{
 			alertError('Amount is greater than balance in the selected account.');
 			$('#samount').css('border-color', '#880000');
@@ -900,13 +901,13 @@ $(document).ready(function(){
 		if(!error)
 		{
 			try{
-				var blk = wallet.addPendingSendBlock(from, to, amountRai);
+				var blk = wallet.addPendingSendBlock(from, to, amountRaw);
 				var hash = blk.getHash(true);
 				
 				refreshBalances();
 				$(".modal").modal('hide');
 				alertInfo("Transaction built successfully. Waiting for work ...");
-				addRecentSendToGui({date: "Just now", amount: amountRai, hash: hash});
+				addRecentSendToGui({date: "Just now", amount: amountRaw, hash: hash});
 				remoteWork(blk.getPrevious());
 			}catch(e){
 				alertError('Ooops, something happened: ' + e.message);
@@ -1002,7 +1003,7 @@ $(document).ready(function(){
 					'<div class="row">'+
 						'<div class="col-sm-2">'+
 							'<span class="blk-type '+type+'">'+block.getType()+'</span><br/>'+
-							'<span class="'+color+' blk-amount">'+symbol+''+(block.getAmount() / 1000000).toFixed(6)+'</span>'+
+							'<span class="'+color+' blk-amount">'+symbol+''+(block.getAmount().over("1000000000000000000000000").toJSNumber() / 1000000).toFixed(6)+'</span>'+
 						'</div>'+
 						'<div class="col-sm-6">'+
 							'<a href="https://raiblocks.net/block/index.php?h='+block.getHash(true)+'" target="_blank"><span class="blk-hash"> '+block.getHash(true)+'</span></a><br/>'+
@@ -1061,14 +1062,14 @@ $(document).ready(function(){
 			return;
 		}
 		
-		if(wallet.setMinimumReceive(minimum))
+		if(wallet.setMinimumReceive(bigInt(minimum).multiply("1000000000000000000000000")))
 		{
 			sync();
 			alertInfo('Settings updated');
 		}
 		else
 		{
-			$('#minimum_receive').val(wallet.getMinimumReceive());
+			$('#minimum_receive').val(wallet.getMinimumReceive().over("1000000000000000000000000"));
 			alertError('Error updating setting. Make sure you entered a valid number in rai units.');
 		}
 	});
