@@ -2,7 +2,7 @@
 
 <h3>Overview</h3>
 <p>
-    This is a web based wallet for <a href="https://raiblockscommunity.net" target="_blank">RaiBlocks</a><br/><br/>
+    This is a web based wallet for <a href="https://raiblocks.net" target="_blank">RaiBlocks</a><br/><br/>
     This repo contains all the files which are downloaded to the browser at <a href="http://raiwallet.com/" target="_blank">RaiWallet</a>.
     Adding a compatible back-end anyone can build his own web based wallet from this. <br/>
     The wallet itself is at <code>Wallet.js</code>. If you want to verify how blocks are created, signed and verified, how accounts are generated, etc ... you should look there. With it you can build your own private and homemade RaiBlocks wallet :D When an efficient way to generate PoW is found, the wallet will be almost self-sufficient. It will only need to query a server to get info about the ledger.
