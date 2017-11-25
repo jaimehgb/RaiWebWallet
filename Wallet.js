@@ -430,7 +430,6 @@ module.exports = function(password)
 	{
 		var temp = keys[current].account;
 		api.useAccount(acc);
-		
 		var blocks = [];
 		
 		if(n > chain.length)
@@ -441,6 +440,21 @@ module.exports = function(password)
 			blocks.push(chain[i]);
 		}
 		api.useAccount(temp);
+		return blocks;
+	}
+	
+	api.getBlocksUpTo = function(acc, hash) 
+	{
+		var temp = keys[current].account;
+		api.useAccount(acc);
+		
+		var blocks = [];
+		for(let i = chain.length - 1; i > 0; i--)
+		{
+			blocks.push(chain[i]);
+			if(chain[i].getHash(true) == hash)
+				break;
+		}
 		return blocks;
 	}
 	

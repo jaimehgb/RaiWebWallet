@@ -651,20 +651,13 @@ $(document).ready(function(){
 				{
 					if(data.forked)
 					{
-						var blk = new Block();
-						blk.buildFromJSON(data.successors[1].block);
-						try{
-							if(wallet.importForkedBlock(blk, acc))
-							{
-								for(let i = 2; i < data.successors.length - 1; i++)
-								{
-									var blk = new Block();
-									blk.buildFromJSON(data.successors[i].block);
-									wallet.importBlock(blk, acc);
-								}
-							}
-							else
-								logger.warn('Trying to fix a fork not found :P');
+						if(data.successors.length == 1)
+						{
+							// this happens when a block is at the wallet but not at the ledger
+							// rebroadcast the rest of the blocks
+							var toRebroadcast = wallet.getBlocksUpTo(acc, data.successors[0].hash);
+							for(let i = 0; i < toRebroadcast.length; i++)
+								broadcastBlock(toRebroadcast[i]);
 							
 							// jump to next account or callback function
 							if(evaluating >= forks.length - 1)
@@ -674,9 +667,36 @@ $(document).ready(function(){
 								evaluating++;
 								resolve(forks[evaluating], 0);
 							}
-							
-						}catch(e){
-							logger.error(e);
+						}
+						else
+						{
+							var blk = new Block();
+							blk.buildFromJSON(data.successors[1].block);
+							try{
+								if(wallet.importForkedBlock(blk, acc))
+								{
+									for(let i = 2; i < data.successors.length - 1; i++)
+									{
+										var blk = new Block();
+										blk.buildFromJSON(data.successors[i].block);
+										wallet.importBlock(blk, acc);
+									}
+								}
+								else
+									logger.warn('Trying to fix a fork not found :P');
+								
+								// jump to next account or callback function
+								if(evaluating >= forks.length - 1)
+									callbackFunction();
+								else
+								{
+									evaluating++;
+									resolve(forks[evaluating], 0);
+								}
+								
+							}catch(e){
+								logger.error(e);
+							}
 						}
 					}
 					else
