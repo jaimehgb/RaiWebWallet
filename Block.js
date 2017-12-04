@@ -542,6 +542,8 @@ module.exports = function()
 			api.setAccount(obj.extras.blockAccount);
 			api.setAmount(obj.extras.blockAmount ? obj.extras.blockAmount : 0);
 			api.setOrigin(obj.extras.origin);
+			if(api.getAmount().greater("1000000000000000000000000000000000000000000000000")) // too big, glitch from the units change a couple of commits ago :P
+				api.setAmount(api.getAmount().over("1000000000000000000000000"));
 		}
 		
 		version = obj.version ? obj.version : 0;
