@@ -336,7 +336,7 @@ $(document).ready(function(){
 				});
 			}
 			else
-				remoteWork(batch[0].hash);
+				remoteWork(batch[0]);
 		}
 		setTimeout(recheckWork, 5000);
 	}
