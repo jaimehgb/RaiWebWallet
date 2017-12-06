@@ -744,6 +744,9 @@ $(document).ready(function(){
 	
 	function goToWallet()
 	{
+		// stop live txs script
+		txs.stop();
+		
 		// load wallet template
 		$('.landing').html('<div class="transition-overlay"><span>RAIWALLET</span><br/><i class="fa fa-circle-o-notch fa-spin fa-fw"></i></div>');
 		$(".modal").modal('hide');

@@ -53,6 +53,23 @@ p {
   background-attachment: fixed;
   color: white;
 }
+.bg-dark-2 {
+  background-color: #222222;
+  background-position: center;
+  padding:50px;
+  color: white;
+}
+@media screen and (max-width: 767px) {
+  .bg-dark-2{
+    padding:0;
+  }
+  .bg-dark .row .hash{
+    font-size:13px;
+  }
+  .bg-dark-2 .elem{
+    overflow:hidden;
+  }
+}
 .text-faded {
   color: rgba(255, 255, 255, 0.7);
 }
@@ -438,4 +455,14 @@ img::-moz-selection {
 }
 body {
   webkit-tap-highlight-color: #222222;
+}
+#tfh, #amtf{
+  font-size:45px;
+}
+.elem{
+    color: #fff;
+    margin: 10px;
+    padding:20px;
+    background: #111;
+    border-radius:5px;
 }

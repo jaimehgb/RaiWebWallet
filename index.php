@@ -107,6 +107,33 @@ session_start();
                 </div>
             </div>
         </aside>
+        
+        <section class="bg-dark-2">
+            <div class="container text-center">
+                <div class="row">
+                    <div class="col-md-4">
+                        <div class="row">
+                            <div class="col-md-12">
+                                <h3>RaiBlocks Transactions Last 24h</h3>
+                                <span id="tfh"><i class="fa fa-circle-o-notch fa-spin fa-fw"></i></span>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-12" style="margin-top:50px">
+                                <h3>Amount Transferred Last 24h</h3>
+                                <span id="amtf"><i class="fa fa-circle-o-notch fa-spin fa-fw"></i></span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-8">
+                        <div class="live">
+                            <div class="elem" style="display:none"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+        
     
         <section id="contact">
             <div class="container">
@@ -329,6 +356,123 @@ session_start();
             $("#wrapper").toggleClass("toggled");
         });
     </script>
+    
+
+    <script>
+        
+        var txs = liveTxs();
+        txs.run();
+        
+        function liveTxs() {
+            var api = {};
+            var conn;
+            var txsCount = 0;
+            var sum = 0;
+            
+            api.run = function() {
+                api.getLast24h(api.connect());
+            }
+            
+            api.getLast24h = function(callback = null) {
+                $.post('ajax.php', 'action=last24h', function(data){
+                    data = JSON.parse(data);
+                    
+                    $('#tfh').html(data.txs);
+                    
+                    if(data.last5) {
+                        for(let i = 0; i < 5; i++)
+                            api.addTx(data.last5[i]);
+                    }
+                    
+                    if(data.sum) {
+                        sum = parseInt(data.sum);
+                        $('#amtf').html((sum / 100000).toFixed(6));
+                    }
+                    
+                    if(callback !== null)
+                        callback();
+                });
+            }
+            
+            api.connect = function() {
+                conn = new WebSocket('wss://raiwallet.com:8332');
+        
+                conn.onmessage = function(data){
+                    api.addTx(JSON.parse(data.data));
+                };
+                
+                conn.onclose = function() {
+                    console.log('Closed');
+                    api.connect();
+                };
+            }
+            
+            api.addTx = function(data) {
+                var elem = document.createElement('div');
+                elem.classList = "elem";
+                var cont = document.createElement('div');
+                cont.classList = "row text-left";
+                var col1 = document.createElement('div');
+                var col2 = document.createElement('div');
+                
+                if(data.type == 'send' || data.type == 'receive') {
+                    var col3 = document.createElement('div');
+                    col1.classList = "col-sm-12 type";
+                    col2.classList = "col-sm-12 hash";
+                    col3.classList = "col-sm-12 amount";
+                    cont.appendChild(col1);
+                    cont.appendChild(col2);
+                    cont.appendChild(col3);
+                    var slice = data.amount.slice(0, data.amount.length - 24);
+                    col3.innerText = (parseFloat(slice) / 1000000).toFixed(6) + " XRB";
+                } else {
+                    col1.classList = "col-sm-12 type";
+                    col2.classList = "col-sm-12 hash";
+                    cont.appendChild(col1);
+                    cont.appendChild(col2);
+                }
+                
+                col1.innerText = data.type;
+                
+                var a = document.createElement('a');
+                a.setAttribute('href', 'https://raiblocks.net/block/index.php?h=' + data.hash);
+                a.setAttribute('target', '_blank');
+                a.innerText = data.hash;
+                col2.appendChild(a);
+                
+                elem.appendChild(cont);
+                elem.setAttribute('style', 'display:none');
+                
+                $('.live').prepend($(elem));
+                $(elem).fadeIn(1000);
+                var elems = document.getElementsByClassName('elem');
+                if(elems.length >= 4) {
+                    var elem = elems[elems.length - 1];
+                    elem.remove();
+                }
+                $('#tfh').html(parseInt($('#tfh').html()) + 1);
+                txsCount++;
+                
+                if(data.type == 'send') {
+                    sum += parseInt(slice);
+                    $('#amtf').html((sum / 100000).toFixed(6));
+                }
+            }
+            
+            api.stop = function() {
+                conn.onclose = null;
+                conn.close();
+            }
+            
+            api.status = function() {
+                console.log(conn);
+            }
+            
+            return api;
+        }
+        
+    </script>
+    
     
     <!-- Wallet -->
     <script src="blake2b.js"></script>
