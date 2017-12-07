@@ -162,7 +162,7 @@
                         <div class="col-md-12">
                             <h3>BackUps</h3>
                             <p>
-                                If you haven't already, please, backup your seed. With it you will be able to recover your funds in case you loose
+                                If you haven't already, please, back up your seed. With it, you will be able to recover your funds in case you lose
                                 your password or your wallet data. 
                             </p>
                             <form method="post">
@@ -238,7 +238,7 @@
                             <p>
                                 Just in case, you can also download your wallet data ciphered. Having the seed is far more efficient, 
                                 but who knows, you may want to have it :P <br/>
-                                Also, as our code is open-sourced you can develop your own wallet starting from there and load it with your keys
+                                Also, as our code is open-source you can develop your own wallet starting from there and load it with your keys
                                 or something.
                             </p>
                             <form method="post">

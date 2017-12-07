@@ -36,10 +36,10 @@
                     </p>
                     <p class="text-left">
                         This is your wallet identifier. You need it to login to your wallet. It can be replaced with an alias to make it
-                        easier to remember from the wallet settings page. If you loose it, can be recovered if you have access to the email
+                        easier to remember from the wallet settings page. If you lose it, it can be recovered if you have access to the email
                         address you have registered with. The wallet under this identifier is stored at our servers encrypted with your password,
-                        the one you used to register. If you forget that password you won't be able to decrypt your wallet, and as we don't know your password
-                        we won't be able to recover it neither. <strong>But</strong> there is another security measure you can take. 
+                        the one you used to register. If you forget that password you won't be able to decrypt your wallet and as we don't know your password
+                        we won't be able to recover it either. <strong>But</strong> there is another security measure you can take. 
                         This is your wallet's seed:
                     </p>
                     <p class="text-center">
@@ -49,7 +49,7 @@
                         <code id="wallet_seed_reg"></code>
                     </p>
                     <p class="text-left">
-                        Backup this seed somewhere safe. Anyone who knows is able to generate all your private keys, thus having access to your
+                        Back up this seed somewhere safe. Anyone who knows it is able to generate all your private keys, thus having access to your
                         funds. So if you forget your password but you have the seed you can recover your funds.
                     </p>
                     <div class="form-group">

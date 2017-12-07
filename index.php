@@ -44,7 +44,7 @@ session_start();
                         <p class="text-faded">
                             Don't wait for the wallet to sync to be able to make transactions. Send and receive payments from anywhere.
                             Import or export your wallet from the official RaiBlocks implementation.
-                            And this without letting anyone know your keys, you are the only owner of your money.
+                            All this without letting anyone know your keys, you are the only owner of your money.
                         </p>
                         <a href="#services" class="page-scroll btn btn-default btn-xl sr-button">Get Started!</a>
                     </div>
