@@ -144,7 +144,7 @@ module.exports = function(password)
 	var pendingBlocks = [];             // current account pending blocks
 	var chain = [];                     // current account chain
 	var representative;					// current account representative	
-	var minimumReceive = 1;				// minimum amount to pocket
+	var minimumReceive = bigInt(1);		// minimum amount to pocket
 	
 	var keys = [];                      // wallet keys, accounts, and all necessary data
 	var recentTxs = [];                 
