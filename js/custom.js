@@ -1131,6 +1131,21 @@ $(document).ready(function(){
 		return false;
 	});
 	
+	$('.form-recovery').submit(function(event) {
+		event.preventDefault();
+		var serialize = $(this).serialize();
+		$.post('ajax.php', 'action=recover_id&'+serialize, function(data) {
+			data = JSON.parse(data);
+			if(data.status == 'success')
+			{
+				alertSuccess(data.msg);
+			}
+			else
+				alertError(data.msg);
+		});
+		return false;
+	})
+	
 	$('#seed_button').click(function(){
 		try{
 			$('#seed_backup').val(wallet.getSeed($('#seed_pass').val()));

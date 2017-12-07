@@ -180,6 +180,7 @@ session_start();
         
         $('.signup').click(function(){
             $("#login-modal").modal('hide');
+            $('#recover-id-modal').modal('hide');
             $("#signup-modal").modal();
             $('body').css('padding-right', '0px');
             return false;
@@ -188,6 +189,14 @@ session_start();
         $('.login').click(function(){
             $("#signup-modal").modal('hide');
             $("#login-modal").modal();
+            $('body').css('padding-right', '0px');
+            return false;
+        });
+        
+        $('#lost_id').click(function(event){
+            event.preventDefault();
+            $("#login-modal").modal('hide');
+            $('#recover-id-modal').modal();
             $('body').css('padding-right', '0px');
             return false;
         });

@@ -76,7 +76,7 @@
                 <div class="modal-body" style="padding:40px 50px;">
                     <form role="form" class="form-login" method="post">
                         <div class="form-group">
-                            <label for="wid">Wallet Identifier</label>
+                            <label for="wid">Wallet Identifier <a href="#" id="lost_id">Lost your identifier?</a></label>
                             <input type="text" name="wallet_id" id="wid" class="form-control" placeholder="e.g.: 33f52770e537dbae2fe307bdc4ccd4de262c705e3b565f67b37754ad46f8525f" required />
                         </div>
                         <div class="form-group">
@@ -85,6 +85,32 @@
                         </div>
                         <div class="form-group">
                             <input type="submit" name="login" class="btn btn-primary btn-block" value="Login"/>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <p class="text-center">Not a member? <a href="#" class="signup">Sign Up</a></p>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="modal fade" id="recover-id-modal" role="dialog">
+        <div class="modal-dialog">
+            <!-- Modal content-->
+            <div class="modal-content">
+                <div class="modal-header bg-primary" style="padding:35px 50px;">
+                    <button type="button" class="close" data-dismiss="modal">&times;</button>
+                    <h4><span class="glyphicon glyphicon-lock"></span> Recover your identifier</h4>
+                </div>
+                <div class="modal-body" style="padding:40px 50px;">
+                    <form role="form" class="form-recovery" method="post">
+                        <div class="form-group">
+                            <label for="wid">Email Address</label>
+                            <input type="text" name="email" id="r_email" class="form-control" placeholder="e.g.: john@doe.com" required />
+                        </div>
+                        <div class="form-group">
+                            <input type="submit" name="recover_id" class="btn btn-primary btn-block" value="Recover"/>
                         </div>
                     </form>
                 </div>
