@@ -1425,9 +1425,12 @@ module.exports = function(password)
 		return walletData;
 	}
 	
-	api.createWallet = function()
+	api.createWallet = function(setSeed = false)
 	{
-		seed = nacl.randomBytes(32);
+		if(!setSeed)
+			seed = nacl.randomBytes(32);
+		else
+			api.setSeed(setSeed);
 		api.newKeyFromSeed();
 		api.useAccount(keys[0].account);
 		return uint8_hex(seed);

@@ -193,6 +193,13 @@ session_start();
             return false;
         });
         
+        $('.import').click(function() {
+            $('#login-modal').modal('hide');
+            $('#import-seed-modal').modal();
+            $('body').css('padding-right', '0px');
+            return false;
+        });
+        
         $('#lost_id').click(function(event){
             event.preventDefault();
             $("#login-modal").modal('hide');

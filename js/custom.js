@@ -594,12 +594,13 @@ $(document).ready(function(){
 								if(j == 0 && emptyAccounts.indexOf(acc) == -1)
 									continue; // first block is already confirmed, unless its missing too :P
 								var blk = new Block();
-								blk.buildFromJSON(data.unsynced[i].blocks[j].block); 
+								blk.buildFromJSON(data.unsynced[i].blocks[j].block, blk.getMaxVersion()); 
 								if(blk.getType() == 'receive' || blk.getType() == 'open')
 									blk.setOrigin(data.unsynced[i].blocks[j].fromto);
 								blk.setImmutable(true);
 								try{
 									wallet.importBlock(blk, acc);
+									wallet.removeReadyBlock(blk.getHash(true)); // so it is not broadcasted, not necessary
 								}catch(e){
 									logger.error(e);
 								}
@@ -671,14 +672,14 @@ $(document).ready(function(){
 						else
 						{
 							var blk = new Block();
-							blk.buildFromJSON(data.successors[1].block);
+							blk.buildFromJSON(data.successors[1].block, blk.getMaxVersion());
 							try{
 								if(wallet.importForkedBlock(blk, acc))
 								{
 									for(let i = 2; i < data.successors.length - 1; i++)
 									{
 										var blk = new Block();
-										blk.buildFromJSON(data.successors[i].block);
+										blk.buildFromJSON(data.successors[i].block, blk.getMaxVersion());
 										wallet.importBlock(blk, acc);
 									}
 								}
@@ -943,10 +944,13 @@ $(document).ready(function(){
 	$('#generate_acc').click(function(){
 		var newAccount = wallet.newKeyFromSeed();
 		addAccountToGUI({account: newAccount, balance: 0});
-		sync();
-		alertSuccess('New account added to wallet.');
-		wallet.useAccount(newAccount);
-		updateReceiveQr(newAccount);
+		checkChains(function(){
+			refreshBalances();
+			sync();
+			alertSuccess('New account added to wallet.');
+			wallet.useAccount(newAccount);
+			updateReceiveQr(newAccount);
+		});
 	});
 	
 	$('#change_repr').click(function(){
@@ -1144,7 +1148,53 @@ $(document).ready(function(){
 				alertError(data.msg);
 		});
 		return false;
-	})
+	});
+	
+	$('.form-import').submit(function(event) {
+		event.preventDefault();
+		let s = $('#i_seed').val();
+		let p1 = $('#import_psw1').val();
+		let p2 = $('#import_psw2').val();
+		
+		if(p1 == p2) {
+			if(/^[0-9A-Fa-f]{64}$/.test(s)) {
+				// create wallet and send to server
+				wallet = new RaiWallet(p1);
+				wallet.setLogger(logger);
+				var seed = wallet.createWallet(s);
+				var pack = wallet.pack();
+				var email = $('#email-import').val();
+				
+				$('input').prop('disabled', true);
+				$.post('ajax.php', 'action=register&email='+email+'&wallet='+pack, function(data){
+					data = JSON.parse(data);
+					
+					if(data.status == 'success')
+					{
+						alertInfo('Wallet successfully registered.');
+						$('#wallet_id_import').html(data.identifier);
+						$('#wallet_seed_import').html(seed);
+						$('.importing').fadeOut(500, function(){
+							$('.imported').fadeIn(500);
+						});
+						registered = true;
+					}
+					else
+					{
+						alertError(data.msg);
+					}
+					$('input').prop('disabled', false);
+				});
+				
+			} else {
+				alertError('Invalid walled seed. It should be a hex encoded 32 byte string.');
+			}
+		} else {
+			alertError('Passwords do not match');
+		}
+		
+		return false;
+	});
 	
 	$('#seed_button').click(function(){
 		try{

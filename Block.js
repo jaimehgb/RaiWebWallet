@@ -33,7 +33,7 @@ module.exports = function()
 	var account;        // open
 	
 	var version = 1;		// to make updates compatible with previous versions of the wallet
-	
+	var BLOCK_MAX_VERSION = 1;
 	
 	/**
 	 * Builds the block and calculates the hash
@@ -490,7 +490,7 @@ module.exports = function()
 		return JSON.stringify(obj);
 	}
 	
-	api.buildFromJSON = function(json)
+	api.buildFromJSON = function(json, v = false)
 	{
 		if(typeof(json) != 'object')
 			var obj = JSON.parse(json);
@@ -546,7 +546,10 @@ module.exports = function()
 				api.setAmount(api.getAmount().over("1000000000000000000000000"));
 		}
 		
-		version = obj.version ? obj.version : 0;
+		if(!v)
+			version = obj.version ? obj.version : 0;
+		else
+			version = v;
 		if(version == 0) {
 			// update block data to new version and then update block version
 			if(type != 'change') {
@@ -592,6 +595,9 @@ module.exports = function()
 		version = v;
 	}
 	
+	api.getMaxVersion = function() {
+		return BLOCK_MAX_VERSION;
+	}
 	
 	return api;
 }

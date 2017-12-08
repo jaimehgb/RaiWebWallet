@@ -89,7 +89,10 @@
                     </form>
                 </div>
                 <div class="modal-footer">
-                    <p class="text-center">Not a member? <a href="#" class="signup">Sign Up</a></p>
+                    <p class="text-center">
+                        Not a member? <a href="#" class="signup">Sign Up</a><br/>
+                        Did you lose your password? <a href="#" class="import">Recover your wallet with your seed</a>
+                    </p>
                 </div>
             </div>
         </div>
@@ -116,6 +119,78 @@
                 </div>
                 <div class="modal-footer">
                     <p class="text-center">Not a member? <a href="#" class="signup">Sign Up</a></p>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="modal fade" id="import-seed-modal" role="dialog">
+        <div class="modal-dialog">
+            <!-- Modal content-->
+            <div class="modal-content">
+                <div class="modal-header bg-primary" style="padding:35px 50px;">
+                    <button type="button" class="close" data-dismiss="modal">&times;</button>
+                    <h4><span class="glyphicon glyphicon-lock"></span> Wallet from Seed</h4>
+                </div>
+                <div class="modal-body importing" style="padding:40px 50px;">
+                    <form role="form" class="form-import" method="post">
+                        <div class="form-group">
+                            <label for="email">Email</label>
+                            <input type="email" name="i_email" class="form-control" id="email-import" placeholder="e.g.: john@doe.com" />
+                        </div>
+                        <div class="form-group">
+                            <label for="wid">Enter your seed</label>
+                            <input type="text" name="seed" id="i_seed" class="form-control" placeholder="e.g.: CD92CFF974A3E3773909BBCF053970B12C9D4A09F320F792814B6F0EB2DDA3AD" required />
+                        </div>
+                        <div class="form-group">
+                            <label for="password">Enter a password to encrypt your wallet</label>
+                            <input type="password" name="psw1" id="import_psw1" class="form-control" />
+                        </div>
+                        <div class="form-group">
+                            <label for="password2">Repeat your password</label>
+                            <input type="password" name="psw2" id="import_psw2" class="form-control" />
+                        </div>
+                        <div class="form-group">
+                            <input type="submit" name="seed_import" class="btn btn-primary btn-block" value="Import"/>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-body imported" style="padding:40px 50px; display:none">
+                    <h3>
+                        Wallet registration successful!
+                    </h3>
+                    <p class="text-center">
+                        <h4>
+                            Identifier
+                        </h4>
+                        <code id="wallet_id_import"></code>
+                    </p>
+                    <p class="text-left">
+                        This is your wallet identifier. You need it to login to your wallet. It can be replaced with an alias to make it
+                        easier to remember from the wallet settings page. If you lose it, it can be recovered if you have access to the email
+                        address you have registered with. The wallet under this identifier is stored at our servers encrypted with your password,
+                        the one you used to register. If you forget that password you won't be able to decrypt your wallet and as we don't know your password
+                        we won't be able to recover it either. <strong>But</strong> there is another security measure you can take. 
+                        This is your wallet's seed:
+                    </p>
+                    <p class="text-center">
+                        <h4>
+                            Seed    
+                        </h4>
+                        <code id="wallet_seed_import"></code>
+                    </p>
+                    <p class="text-left">
+                        Back up this seed somewhere safe. Anyone who knows it is able to generate all your private keys, thus having access to your
+                        funds. So if you forget your password but you have the seed you can recover your funds.
+                    </p>
+                    <div class="form-group">
+                        <button type="button" class="btn btn-primary form-control gotowallet">
+                            Go to your wallet
+                        </button>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <p class="text-center">Don't have a wallet? <a href="#" class="signup">Sign Up</a></p>
                 </div>
             </div>
         </div>
