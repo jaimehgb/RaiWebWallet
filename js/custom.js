@@ -1,5 +1,6 @@
-var RaiWallet = require('../Wallet');
-var Block = require('../Block.js');
+var RaiWallet = require('rai-wallet');
+var Wallet = RaiWallet.Wallet;
+var Block = RaiWallet.Block;
 var wallet;
 var registered = false;
 var lastRetrieved = 0;
@@ -16,8 +17,7 @@ var signOutInterval = 30;
 var RESOLVE_FORKS_BLOCK_BATCH_SIZE = 20;
 
 $(document).ready(function(){
-	
-	
+
 	function toast(title, msg)
 	{
 		$.toast({

@@ -166,7 +166,6 @@ session_start();
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery-easing/1.3/jquery.easing.min.js"></script>
     <script src="vendor/scrollreveal/scrollreveal.min.js"></script>
     <script src="vendor/magnific-popup/jquery.magnific-popup.min.js"></script>
-    
 
     <!-- Theme JavaScript -->
     <script src="js/creative.min.js"></script>
@@ -491,12 +490,15 @@ session_start();
     
     
     <!-- Wallet -->
+    <!--
+    Following two scripts are deprecated
     <script src="blake2b.js"></script>
     <script src="node_modules/tweetnacl/nacl.js"></script>
+    -->
     <script type="text/javascript" src="functions.js"></script>
     <script type="text/javascript" src="js/bigInteger.min.js"></script>
     <script type="text/javascript" src="Logger.js"></script>
-    <script src="main.js?v=1.0.2"></script>
+    <script src="main.js?v=1.0.3"></script>
 
 </body>
 

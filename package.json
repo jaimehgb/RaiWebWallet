@@ -1,0 +1,18 @@
+{
+  "homepage": "https://raiwallet.com/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jaimehgb/RaiWebWallet.git"
+  },
+  "dependencies": {
+    "blakejs": "^1.1.0",
+    "rai-wallet": "0.0.6",
+    "tweetnacl": "^1.0.0"
+  },
+  "scripts": {
+    "build": "./node_modules/.bin/browserify js/custom.js -o main.js"
+  },
+  "devDependencies": {
+    "browserify": "^14.5.0"
+  }
+}
