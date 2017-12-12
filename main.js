@@ -1,2059 +1,7 @@
 (function e(t,n,r){function s(o,u){if(!n[o]){if(!t[o]){var a=typeof require=="function"&&require;if(!u&&a)return a(o,!0);if(i)return i(o,!0);var f=new Error("Cannot find module '"+o+"'");throw f.code="MODULE_NOT_FOUND",f}var l=n[o]={exports:{}};t[o][0].call(l.exports,function(e){var n=t[o][1][e];return s(n?n:e)},l,l.exports,e,t,n,r)}return n[o].exports}var i=typeof require=="function"&&require;for(var o=0;o<r.length;o++)s(r[o]);return s})({1:[function(require,module,exports){
-var MAGIC_NUMBER = "5243";   // 0x52 0x43
-var VERSION_MAX = "01";      // 0x01
-var VERSION_MIN = "01";      // 0x01
-var VERSION_USING = "01";    // 0x01
-var EXTENSIONS = "0002";     // 0x00 0x02
-var RAI_TO_RAW = "000000000000000000000000";
-var MAIN_NET_WORK_THRESHOLD = "ffffffc000000000";
-
-var blockID = {invalid: 0, not_a_block: 1, send: 2, receive: 3, open: 4, change: 5}
-
-module.exports = function()
-{
-	var api = {};       // public methods
-	var lowLevel = {};  // private methods
-	var data = "";      // raw block to be relayed to the network directly
-	var type;           // block type
-	var hash;           // block hash
-	var signed = false; // if block has signature
-	var worked = false; // if block has work
-	var signature = ""; // signature
-	var work = "";      // work
-	var blockAmount = bigInt(0);// amount transferred
-	var blockAccount;   // account owner of this block
-	var origin;			// account sending money in case of receive or open block
-	var immutable = false; // if true means block has already been confirmed and cannot be changed, some checks are ignored
-	
-	var previous;       // send, receive and change
-	var destination;    // send
-	var balance;        // send
-	var decBalance;
-	var source;         // receive and open
-	var representative; // open and change
-	var account;        // open
-	
-	var version = 1;		// to make updates compatible with previous versions of the wallet
-	var BLOCK_MAX_VERSION = 1;
-	
-	/**
-	 * Builds the block and calculates the hash
-	 * 
-	 * @throws An exception on invalid type
-	 * @returns {Array} The block hash
-	 */
-	api.build = function()
-	{
-		
-		switch(type)
-		{
-			case 'send':
-				data = "";
-				data += MAGIC_NUMBER + VERSION_MAX + VERSION_USING + VERSION_MIN + uint8_hex(blockID[type]) + EXTENSIONS;
-				data += previous;
-				data += destination
-				data += balance;
-				
-				var context = blake2bInit(32, null);
-				blake2bUpdate(context, hex_uint8(previous));
-				blake2bUpdate(context, hex_uint8(destination));
-				blake2bUpdate(context, hex_uint8(balance));
-				hash = uint8_hex(blake2bFinal(context));
-				break;
-			
-			case 'receive':
-				data = "";
-				data += MAGIC_NUMBER + VERSION_MAX + VERSION_USING + VERSION_MIN + uint8_hex(blockID[type]) + EXTENSIONS;
-				data += previous;
-				data += source;
-				
-				var context = blake2bInit(32, null);
-				blake2bUpdate(context, hex_uint8(previous));
-				blake2bUpdate(context, hex_uint8(source));
-				hash = uint8_hex(blake2bFinal(context));
-				break;
-			
-			case 'open':
-				data = "";
-				data += MAGIC_NUMBER + VERSION_MAX + VERSION_USING + VERSION_MIN + uint8_hex(blockID[type]) + EXTENSIONS;
-				data += source;
-				data += representative;
-				data += account;
-				
-				var context = blake2bInit(32, null);
-				blake2bUpdate(context, hex_uint8(source));
-				blake2bUpdate(context, hex_uint8(representative));
-				blake2bUpdate(context, hex_uint8(account));
-				hash = uint8_hex(blake2bFinal(context));
-				break;
-			
-			case 'change':
-				data = "";
-				data += MAGIC_NUMBER + VERSION_MAX + VERSION_USING + VERSION_MIN + uint8_hex(blockID[type]) + EXTENSIONS;
-				data += previous;
-				data += representative;
-				
-				var context = blake2bInit(32, null);
-				blake2bUpdate(context, hex_uint8(previous));
-				blake2bUpdate(context, hex_uint8(representative));
-				hash = uint8_hex(blake2bFinal(context));
-				break;
-			
-			default:
-				throw "Block parameters need to be set first.";
-		}
-		
-		return hash;
-	}
-	
-	/**
-	 * Sets the send parameters and builds the block
-	 * 
-	 * @param {string} previousBlockHash - The previous block 32 byte hash hex encoded
-	 * @param {string} destinationAccount - The XRB account receiving the money
-	 * @param {string} balanceRemaining - Remaining balance after sending this block (Raw)
-	 * @throws An exception on invalid block hash
-	 * @throws An exception on invalid destination account
-	 * @throws An exception on invalid balance
-	 */
-	api.setSendParameters = function(previousBlockHash, destinationAccount, balanceRemaining)
-	{
-		if( !/[0-9A-F]{64}/i.test(previousBlockHash) )
-			throw "Invalid previous block hash.";
-		
-		try{
-			var pk = keyFromAccount(destinationAccount);
-		}catch(err){
-			throw "Invalid destination account.";
-		}
-		
-		previous = previousBlockHash;
-		destination = pk;
-		decBalance = balanceRemaining;
-		balance = dec2hex(balanceRemaining, 16);
-		type = 'send';
-	}
-	
-	/**
-	 * Sets the receive parameters and builds the block
-	 * 
-	 * @param {string} previousBlockHash - The previous block 32 byte hash hex encoded
-	 * @param {string} sourceBlockHash - The hash of the send block which is going to be received, 32 byte hex encoded
-	 * @throws An exception on invalid previousBlockHash
-	 * @throws An exception on invalid sourceBlockHash
-	 */
-	api.setReceiveParameters = function(previousBlockHash, sourceBlockHash)
-	{
-		if( !/[0-9A-F]{64}/i.test(previousBlockHash) )
-			throw "Invalid previous block hash.";
-		if( !/[0-9A-F]{64}/i.test(sourceBlockHash) )
-			throw "Invalid source block hash.";
-		
-		previous = previousBlockHash;
-		source = sourceBlockHash;
-		type = 'receive';
-		
-	}
-	
-	/**
-	 * Sets the open parameters and builds the block
-	 * 
-	 * @param {string} sourceBlockHash - The hash of the send block which is going to be received, 32 byte hex encoded
-	 * @param {string} newAccount - The XRB account which is being created
-	 * @param {string} representativeAccount - The account to be set as representative, if none, its self assigned
-	 * @throws An exception on invalid sourceBlockHash
-	 * @throws An exception on invalid account
-	 * @throws An exception on invalid representative account
-	 */
-	api.setOpenParameters = function(sourceBlockHash, newAccount, representativeAccount = null)
-	{
-		if( !/[0-9A-F]{64}/i.test(sourceBlockHash) )
-			throw "Invalid source block hash.";
-			
-		try{
-			account = keyFromAccount(newAccount);
-		}catch(err){
-			throw "Invalid XRB account.";
-		}
-		
-		if(representativeAccount)
-		{
-			try{
-				representative = keyFromAccount(representativeAccount);
-			}catch(err){
-				throw "Invalid representative account.";
-			}
-		}
-		else
-			representative = account;
-		
-		source = sourceBlockHash;
-		type = 'open';
-		
-	}
-	
-	/**
-	 * Sets the change parameters and builds the block
-	 * 
-	 * @param {string} previousBlockHash - The previous block 32 byte hash hex encoded
-	 * @param {string} representativeAccount - The account to be set as representative
-	 * @throws An exception on invalid previousBlockHash
-	 * @throws An exception on invalid representative account
-	 */
-	 api.setChangeParameters = function(previousBlockHash, representativeAccount)
-	 {
-		 if( !/[0-9A-F]{64}/i.test(previousBlockHash) )
-			throw "Invalid previous block hash.";
-			
-		try{
-			representative = keyFromAccount(representativeAccount);
-		}catch(err){
-			throw "Invalid representative account.";
-		}
-		
-		previous = previousBlockHash;
-		type = "change";
-	 }
-	
-	
-	/**
-	 * Sets the block signature
-	 * 
-	 * @param {string} hex - The hex encoded 64 byte block hash signature
-	 */
-	api.setSignature = function(hex)
-	{
-		signature = hex;
-		signed = true;
-	}
-	
-	/**
-	 * Sets the block work
-	 * 
-	 * @param {string} hex - The hex encoded 8 byte block hash PoW
-	 * @throws An exception if work is not enough
-	 */
-	api.setWork = function(hex)
-	{
-		if(!api.checkWork(hex))
-			throw "Work not valid for block";
-		work = hex;
-		worked = true;
-	}
-	
-	/**
-	 * Sets block amount, to be retrieved from it directly instead of calculating it quering the chain
-	 *
-	 * @param {number} am - The amount
-	 */
-	api.setAmount = function(am)
-	{
-		blockAmount = bigInt(am);
-	}
-	
-	/**
-	 * 
-	 * @returns blockAmount - The amount transferred in raw
-	 */
-	api.getAmount = function()
-	{
-		return blockAmount;
-	} 
-	
-	/**
-	 * Sets the account owner of the block 
-	 *
-	 * @param {string} acc - The xrb account 
-	 */
-	api.setAccount = function(acc)
-	{
-		blockAccount = acc;
-		if(type == 'send')
-			origin = acc;
-	}
-	
-	/**
-	 * 
-	 * @returns blockAccount
-	 */
-	api.getAccount = function()
-	{
-		return blockAccount;
-	}
-	
-	/**
-	 * Sets the account which sent the block 
-	 * @param {string} acc - The xrb account
-	 */
-	api.setOrigin = function(acc)
-	{
-		if(type == 'receive' || type == 'open')
-			origin = acc;
-	}
-	
-	/**
-	 *
-	 * @returns originAccount
-	 */
-	api.getOrigin = function()
-	{
-		if(type == 'receive' || type == 'open')
-			return origin;
-		if(type == 'send')
-			return blockAccount;
-		return false;
-	}
-	
-	/**
-	 *
-	 * @returns destinationAccount
-	 */
-	api.getDestination = function()
-	{
-		if(type == 'send')
-			return accountFromHexKey(destination);
-		if(type == 'receive' || type == 'open')
-			return blockAccount;
-	}
-	
-	/**
-	 * 
-	 * @param {boolean} hex - To get the hash hex encoded
-	 * @returns {string} The block hash
-	 */
-	api.getHash = function(hex = false)
-	{
-		return hex ? hash : hex_uint8(hash);
-	}
-	
-	api.getSignature = function()
-	{
-		return signature;
-	}
-	
-	api.getType = function()
-	{
-		return type;
-	}
-	
-	api.getBalance = function(format = 'dec')
-	{
-		if(format == 'dec')
-		{
-			var dec = bigInt(hex2dec(balance));
-			return dec;
-		}
-		return balance;
-	}
-	
-	/**
-	 * Returns the previous block hash if its not an open block, the public key if it is
-	 * 
-	 * @returns {string} The previous block hash
-	 */
-	api.getPrevious = function()
-	{
-		if(type == 'open')
-			return account;
-		return previous;
-	}
-	
-	api.getSource = function()
-	{
-		return source;
-	}
-	
-	api.getRepresentative = function()
-	{
-		if(type == 'change' || type == 'open')
-			return accountFromHexKey(representative);
-		else
-			return false;
-	}
-	
-	api.ready = function()
-	{
-		return signed && worked;
-	}
-	
-	api.setImmutable = function(bool)
-	{
-		immutable = bool;
-	}
-	
-	api.isImmutable = function()
-	{
-		return immutable;
-	}
-	
-	/**
-	 * Changes the previous block hash and rebuilds the block
-	 * 
-	 * @param {string} newPrevious - The previous block hash hex encoded
-	 * @throws An exception if its an open block
-	 * @throws An exception if block is not built
-	 */
-	api.changePrevious = function(newPrevious)
-	{
-		switch(type)
-		{
-			case 'open':
-				throw 'Open has no previous block.';
-				break;
-			case 'receive':
-				api.setReceiveParameters(newPrevious, source);
-				api.build();
-				break;
-			case 'send':
-				api.setSendParameters(newPrevious, destination, stringFromHex(balance).replace(RAI_TO_RAW, ''));
-				api.build();
-				break;
-			case 'change':
-				api.setChangeParameters(newPrevious, representative);
-				api.build();
-				break;
-			default:
-				throw "Invalid block type";
-		}
-	}
-	
-	/**
-	 *
-	 * @returns {string} The raw block hex encoded ready to be sent to the network
-	 */
-	api.getRawBlock = function()
-	{
-		if(!signed || !worked)
-			throw "Incomplete block";
-		return data;
-	}
-	
-	/**
-	 * 
-	 * @returns {string} The block JSON encoded to be broadcasted with RPC
-	 */
-	api.getJSONBlock = function(pretty = false)
-	{
-		if(!signed)
-			throw "Block lacks signature";
-		var obj = {};
-		obj.type = type;
-		
-		switch(type)
-		{
-			case 'send':
-				obj.previous = previous;
-				obj.destination = accountFromHexKey(destination);
-				obj.balance = balance;
-				break;
-			
-			case 'receive':
-				obj.previous = previous;
-				obj.source = source;
-				break;
-			
-			case 'open':
-				obj.source = source;
-				obj.representative = accountFromHexKey( representative ? representative : account );
-				obj.account = accountFromHexKey(account);
-				break;
-			
-			case 'change':
-				obj.previous = previous;
-				obj.representative = accountFromHexKey( representative );
-				break;
-			
-			default:
-				throw "Invalid block type.";
-		}
-		
-		obj.work = work;
-		obj.signature = signature;
-		
-		if(pretty)
-			return JSON.stringify(obj, null, 2);
-		return JSON.stringify(obj);
-	}
-	
-	api.getEntireJSON = function()
-	{
-		var obj = JSON.parse(api.getJSONBlock());
-		var extras = {};
-		
-		extras.blockAccount = blockAccount;
-		if(blockAmount)
-			extras.blockAmount = blockAmount.toString();
-		else
-			extras.blockAmount = 0;
-		extras.origin = origin;
-		obj.extras = extras;
-		obj.version = version;
-		return JSON.stringify(obj);
-	}
-	
-	api.buildFromJSON = function(json, v = false)
-	{
-		if(typeof(json) != 'object')
-			var obj = JSON.parse(json);
-		else
-			var obj = json;
-
-		switch(obj.type)
-		{
-			case 'send':
-				type = 'send';
-				previous = obj.previous;
-				destination = keyFromAccount(obj.destination);
-				balance = obj.balance;
-				break;
-			
-			case 'receive':
-				type = 'receive';
-				previous = obj.previous;
-				source = obj.source;
-				break;
-			
-			case 'open':
-				type = 'open';
-				source = obj.source;
-				representative = keyFromAccount(obj.representative);
-				account = keyFromAccount(obj.account);
-				break;
-			
-			case 'change':
-				type = 'change';
-				previous = obj.previous;
-				representative = keyFromAccount(obj.representative);
-				break;
-			
-			default:
-				throw "Invalid block type.";
-		}
-
-		signature = obj.signature;
-		work = obj.work;
-		
-		if(work)
-			worked = true;
-		if(signature)
-			signed = true;
-		
-		if(obj.extras !== undefined)
-		{
-			api.setAccount(obj.extras.blockAccount);
-			api.setAmount(obj.extras.blockAmount ? obj.extras.blockAmount : 0);
-			api.setOrigin(obj.extras.origin);
-			if(api.getAmount().greater("1000000000000000000000000000000000000000000000000")) // too big, glitch from the units change a couple of commits ago :P
-				api.setAmount(api.getAmount().over("1000000000000000000000000"));
-		}
-		
-		if(!v)
-			version = obj.version ? obj.version : 0;
-		else
-			version = v;
-		if(version == 0) {
-			// update block data to new version and then update block version
-			if(type != 'change') {
-				if(blockAmount) {
-					api.setAmount(blockAmount.multiply("1000000000000000000000000")); // rai to raw
-				}
-			}
-			api.setVersion(1);
-		}
-		
-		api.build();
-		
-	}
-	
-	api.checkWork = function(work, blockHash = false)
-	{
-		if(blockHash === false)
-		{
-			blockHash = api.getPrevious();
-		}
-		
-		var t = hex_uint8(MAIN_NET_WORK_THRESHOLD);
-		var context = blake2bInit(8, null);
-		blake2bUpdate(context, hex_uint8(work).reverse());
-		blake2bUpdate(context, hex_uint8(blockHash));
-		var threshold = blake2bFinal(context).reverse();
-		
-		if(threshold[0] == t[0])
-			if(threshold[1] == t[1])
-				if(threshold[2] == t[2])
-					if(threshold[3] >= t[3])
-						return true;
-		return false;
-	}
-	
-	api.getVersion = function()
-	{
-		return version;
-	}
-	
-	api.setVersion = function(v)
-	{
-		version = v;
-	}
-	
-	api.getMaxVersion = function() {
-		return BLOCK_MAX_VERSION;
-	}
-	
-	return api;
-}
-
-
-},{}],2:[function(require,module,exports){
-var pbkdf2 = require('pbkdf2');
-var crypto = require('crypto');
-var assert = require('assert');
-var Block = require('./Block');
-var Buffer = require('buffer').Buffer;
-
-var MAIN_NET_WORK_THRESHOLD = "ffffffc000000000";
-var SUPPORTED_ENCRYPTION_VERSION = 3;
-var SALT_BYTES = 16;
-var KEY_BIT_LEN = 256;
-var BLOCK_BIT_LEN = 128;
-
-var ALGO = {
-  SHA1: 'sha1',
-  SHA256: 'sha256'
-};
-
-var NoPadding = {
-  /*
-  *   Literally does nothing...
-  */
-
-  pad: function (dataBytes) {
-	return dataBytes;
-  },
-
-  unpad: function (dataBytes) {
-	return dataBytes;
-  }
-};
-
-var ZeroPadding = {
-  /*
-  *   Fills remaining block space with 0x00 bytes
-  *   May cause issues if data ends with any 0x00 bytes
-  */
-
-  pad: function (dataBytes, nBytesPerBlock) {
-	var nPaddingBytes = nBytesPerBlock - dataBytes.length % nBytesPerBlock;
-	var zeroBytes = new Buffer(nPaddingBytes).fill(0x00);
-	return Buffer.concat([ dataBytes, zeroBytes ]);
-  },
-
-  unpad: function (dataBytes) {
-	var unpaddedHex = dataBytes.toString('hex').replace(/(00)+$/, '');
-	return new Buffer(unpaddedHex, 'hex');
-  }
-};
-
-var Iso10126 = {
-  /*
-  *   Fills remaining block space with random byte values, except for the
-  *   final byte, which denotes the byte length of the padding
-  */
-
-  pad: function (dataBytes, nBytesPerBlock) {
-	var nPaddingBytes = nBytesPerBlock - dataBytes.length % nBytesPerBlock;
-	var paddingBytes = crypto.randomBytes(nPaddingBytes - 1);
-	var endByte = new Buffer([ nPaddingBytes ]);
-	return Buffer.concat([ dataBytes, paddingBytes, endByte ]);
-  },
-
-  unpad: function (dataBytes) {
-	var nPaddingBytes = dataBytes[dataBytes.length - 1];
-	return dataBytes.slice(0, -nPaddingBytes);
-  }
-};
-
-var Iso97971 = {
-  /*
-  *   Fills remaining block space with 0x00 bytes following a 0x80 byte,
-  *   which serves as a mark for where the padding begins
-  */
-
-  pad: function (dataBytes, nBytesPerBlock) {
-	var withStartByte = Buffer.concat([ dataBytes, new Buffer([ 0x80 ]) ]);
-	return ZeroPadding.pad(withStartByte, nBytesPerBlock);
-  },
-
-  unpad: function (dataBytes) {
-	var zeroBytesRemoved = ZeroPadding.unpad(dataBytes);
-	return zeroBytesRemoved.slice(0, zeroBytesRemoved.length - 1);
-  }
-};
-
-
-var AES = {
-  CBC: 'aes-256-cbc',
-  OFB: 'aes-256-ofb',
-  ECB: 'aes-256-ecb',
-
-  /*
-  *   Encrypt / Decrypt with aes-256
-  *   - dataBytes, key, and salt are expected to be buffers
-  *   - default options are mode=CBC and padding=auto (PKCS7)
-  */
-
-  encrypt: function (dataBytes, key, salt, options) {
-	options = options || {};
-	assert(Buffer.isBuffer(dataBytes), 'expected `dataBytes` to be a Buffer');
-	assert(Buffer.isBuffer(key), 'expected `key` to be a Buffer');
-	assert(Buffer.isBuffer(salt) || salt === null, 'expected `salt` to be a Buffer or null');
-
-	var cipher = crypto.createCipheriv(options.mode || AES.CBC, key, salt || '');
-	cipher.setAutoPadding(!options.padding);
-
-	if (options.padding) dataBytes = options.padding.pad(dataBytes, BLOCK_BIT_LEN / 8);
-	var encryptedBytes = Buffer.concat([ cipher.update(dataBytes), cipher.final() ]);
-
-	return encryptedBytes;
-  },
-
-  decrypt: function (dataBytes, key, salt, options) {
-	options = options || {};
-	assert(Buffer.isBuffer(dataBytes), 'expected `dataBytes` to be a Buffer');
-	assert(Buffer.isBuffer(key), 'expected `key` to be a Buffer');
-	assert(Buffer.isBuffer(salt) || salt === null, 'expected `salt` to be a Buffer or null');
-
-	var decipher = crypto.createDecipheriv(options.mode || AES.CBC, key, salt || '');
-	decipher.setAutoPadding(!options.padding);
-
-	var decryptedBytes = Buffer.concat([ decipher.update(dataBytes), decipher.final() ]);
-	if (options.padding) decryptedBytes = options.padding.unpad(decryptedBytes);
-
-	return decryptedBytes;
-  }
-};
-
-
-
-module.exports = function(password)
-{
-	var api = {};                       // wallet public methods
-	var private = {};                   // wallet private methods
-	
-	var raiwalletdotcomRepresentative = "xrb_3pczxuorp48td8645bs3m6c3xotxd3idskrenmi65rbrga5zmkemzhwkaznh"; // self explaining
-	
-	var pk;                             // current account public key
-	var sk;                             // current account secret key
-	var pendingBalance;                 // current account pending balance
-	var balance;                        // current account balance
-	var lastBlock = "";                 // current account last block
-	var lastPendingBlock = "";
-	var pendingBlocks = [];             // current account pending blocks
-	var chain = [];                     // current account chain
-	var representative;					// current account representative	
-	var minimumReceive = bigInt(1);		// minimum amount to pocket
-	
-	var keys = [];                      // wallet keys, accounts, and all necessary data
-	var recentTxs = [];                 
-	var walletPendingBlocks = [];       // wallet pending blocks
-	var readyBlocks = [];               // wallet blocks signed and worked, ready to broadcast and add to chain
-	var errorBlocks = [];               // blocks which could not be confirmed
-	
-	var remoteWork = [];                // work pool
-	var autoWork = false;               // generate work automatically on receive transactions (server)
-	
-	var current = -1;                   // key being used
-	var seed = "";                      // wallet seed
-	var lastKeyFromSeed = -1;           // seed index
-	var passPhrase = password;          // wallet password
-	var iterations = 5000;              // pbkdf2 iterations
-	var checksum;                       // wallet checksum 
-	var ciphered = true;
-	
-	var logger = new Logger();
- 
-	api.debug = function()
-	{
-		console.log(readyBlocks);
-	}
-	
-	api.debugChain = function()
-	{
-		api.useAccount(keys[1].account);
-		for(let i in chain)
-		{
-			console.log(chain[i].getHash(true));
-			console.log(chain[i].getPrevious());
-		}
-	}
-	
-	api.setLogger = function(loggerObj)
-	{
-		logger = loggerObj;
-	}
-	
-	/**
-	 * Sets the secret key to do all the signing stuff
-	 * 
-	 * @param {Array} hex - The secret key byte array
-	 * @throws An exception on invalid secret key length
-	 */
-	private.setSecretKey = function(bytes)
-	{
-		if(bytes.length != 32)
-			throw "Invalid Secret Key length. Should be 32 bytes.";
-			
-		sk = bytes;
-		pk = nacl.sign.keyPair.fromSecretKey(sk).publicKey;
-	}
-	
-	/**
-	 * Signs a message with the secret key
-	 * 
-	 * @param {Array} message - The message to be signed in a byte array
-	 * @returns {Array} The 64 byte signature
-	 */
-	api.sign = function(message)
-	{
-		return nacl.sign.detached(message, sk);
-	}
-	
-	api.changePass = function(pswd, newPass)
-	{
-		if(ciphered)
-			throw "Wallet needs to be decrypted first.";
-		if(pswd == passPhrase)
-		{
-			passPhrase = newPass;
-			logger.log("Password changed");
-		}
-		else
-			throw "Incorrect password.";
-	}
-	
-	api.setIterations = function(newIterationNumber)
-	{
-		newIterationNumber = parseInt(newIterationNumber);
-		if(newIterationNumber < 2)
-			throw "Minumum iteration number is 2.";
-		
-		iterations = newIterationNumber;
-	}
-	
-	api.setMinimumReceive = function(raw_amount)
-	{
-		raw_amount = bigInt(raw_amount);
-		if(raw_amount.lesser(0))
-			return false;
-		minimumReceive = raw_amount;
-		return true;
-	}
-	
-	api.getMinimumReceive = function()
-	{
-		return minimumReceive;
-	}
-	
-	/**
-	 * Sets a seed for the wallet
-	 * 
-	 * @param {string} hexSeed - The 32 byte seed hex encoded
-	 * @throws An exception on malformed seed
-	 */
-	api.setSeed = function(hexSeed)
-	{
-		if(!/[0-9A-F]{64}/i.test(hexSeed))
-			throw "Invalid Hex Seed.";
-		seed = hex_uint8(hexSeed);
-	}
-	
-	api.getSeed = function(pswd)
-	{
-		if(pswd == passPhrase)
-			return uint8_hex(seed);
-		throw "Incorrect password.";
-	}
-	
-	/**
-	 * Sets a random seed for the wallet
-	 * 
-	 * @param {boolean} overwrite - Set to true to overwrite an existing seed
-	 * @throws An exception on existing seed
-	 */
-	api.setRandomSeed = function(overwrite = false)
-	{
-		if(seed && !overwrite)
-			throw "Seed already exists. To overwrite use setSeed or set overwrite to true";
-		seed = nacl.randomBytes(32);
-	}
-	
-	/**
-	 * Derives a new secret key from the seed and adds it to the wallet
-	 * 
-	 * @throws An exception if theres no seed
-	 */
-	api.newKeyFromSeed = function()
-	{
-		if(seed.length != 32)
-			throw "Seed should be set first.";
-		
-		var index = lastKeyFromSeed + 1;
-		index = hex_uint8(dec2hex(index, 4));
-		
-		var context = blake2bInit(32);
-		blake2bUpdate(context, seed);
-		blake2bUpdate(context, index);
-		
-		var newKey = blake2bFinal(context);
-		
-		lastKeyFromSeed++;
-		
-		logger.log("New key generated");
-		api.addSecretKey(uint8_hex(newKey));
-		
-		return accountFromHexKey(uint8_hex(nacl.sign.keyPair.fromSecretKey(newKey).publicKey));
-	}
-	
-	/**
-	 * Adds a key to the wallet
-	 * 
-	 * @param {string} hex - The secret key hex encoded
-	 * @throws An exception on invalid secret key length
-	 * @throws An exception on invalid hex format
-	 */
-	api.addSecretKey = function(hex)
-	{
-		if(hex.length != 64)
-			throw "Invalid Secret Key length. Should be 32 bytes.";
-		
-		if(!/[0-9A-F]{64}/i.test(hex))
-			throw "Invalid Hex Secret Key.";
-		
-		keys.push(
-			{
-				priv: hex_uint8(hex),
-				pub: nacl.sign.keyPair.fromSecretKey(hex_uint8(hex)).publicKey,
-				account: accountFromHexKey(uint8_hex(nacl.sign.keyPair.fromSecretKey(hex_uint8(hex)).publicKey)), 
-				balance: bigInt(0), 
-				pendingBalance: bigInt(0),
-				lastBlock: "",
-				lastPendingBlock: "",
-				subscribed: false,
-				chain: [],
-				representative: "",
-				label : ""
-			}
-		);
-		logger.log("New key added to wallet.");
-	}
-	
-	/**
-	 * 
-	 * @param {boolean} hex - To return the result hex encoded
-	 * @returns {string} The public key hex encoded
-	 * @returns {Array} The public key in a byte array
-	 */
-	api.getPublicKey = function(hex = false)
-	{
-		if(hex)
-			return uint8_hex(pk);
-		return pk;
-	}
-	
-	/**
-	 * List all the accounts in the wallet
-	 * 
-	 * @returns {Array}
-	 */
-	api.getAccounts = function()
-	{
-		var accounts = [];
-		for(var i in keys)
-		{
-			accounts.push({
-				account: keys[i].account,
-				balance: bigInt(keys[i].balance), 
-				pendingBalance: bigInt(keys[i].pendingBalance),
-				label: keys[i].label
-			});
-		}
-		return accounts;
-	}
-	
-	/**
-	 * Switches the account being used by the wallet
-	 * 
-	 * @param {string} accountToUse
-	 * @throws An exception if the account is not found in the wallet
-	 */
-	api.useAccount = function(accountToUse)
-	{
-		// save current account status
-		if(current != -1)
-		{
-			keys[current].balance = balance;
-			keys[current].pendingBalance = pendingBalance;
-			keys[current].lastBlock = lastBlock;
-			keys[current].lastPendingBlock = lastPendingBlock;
-			keys[current].chain = chain;
-			keys[current].pendingBlocks = pendingBlocks;
-			keys[current].representative = representative;
-		}
-		
-		for(var i in keys)
-		{
-			if(keys[i].account == accountToUse)
-			{
-				private.setSecretKey(keys[i].priv);
-				balance = keys[i].balance;
-				pendingBalance = keys[i].pendingBalance;
-				current = i;
-				lastBlock = keys[i].lastBlock;
-				lastPendingBlock = keys[i].lastPendingBlock;
-				chain = keys[i].chain;
-				representative = keys[i].representative;
-				return;
-			}
-		}
-		throw "Account not found in wallet ("+accountToUse+") "+JSON.stringify(api.getAccounts());
-	}
-	
-	api.importChain = function(blocks, acc)
-	{
-		api.useAccount(acc);
-		var last = chain.length > 0 ? chain[chain.length - 1].getHash(true) : uint8_hex(pk);
-		// verify chain
-		for(let i in blocks)
-		{
-			if(blocks[i].getPrevious() != last)
-				throw "Invalid chain";
-			if(!api.verifyBlock(blocks[i]))
-			   throw "There is an invalid block";
-			
-		}
-	}
-	
-	api.getLastNBlocks = function(acc, n, offset = 0)
-	{
-		var temp = keys[current].account;
-		api.useAccount(acc);
-		var blocks = [];
-		
-		if(n > chain.length)
-			n = chain.length;
-		
-		for(let i = chain.length - 1 - offset; i > chain.length - 1 - n - offset; i--)
-		{
-			blocks.push(chain[i]);
-		}
-		api.useAccount(temp);
-		return blocks;
-	}
-	
-	api.getBlocksUpTo = function(acc, hash) 
-	{
-		var temp = keys[current].account;
-		api.useAccount(acc);
-		
-		var blocks = [];
-		for(let i = chain.length - 1; i > 0; i--)
-		{
-			blocks.push(chain[i]);
-			if(chain[i].getHash(true) == hash)
-				break;
-		}
-		return blocks;
-	}
-	
-	api.getAccountBlockCount = function(acc)
-	{
-		var temp = keys[current].account;
-		api.useAccount(acc);
-		
-		var n = chain.length;
-		api.useAccount(temp);
-		return n;
-	}
-	
-	/**
-	 * Generates a block signature from the block hash using the secret key
-	 * 
-	 * @param {string} blockHash - The block hash hex encoded
-	 * @throws An exception on invalid block hash length
-	 * @throws An exception on invalid block hash hex encoding
-	 * @returns {string} The 64 byte hex encoded signature
-	 */
-	api.signBlock = function(block)
-	{
-		var blockHash = block.getHash();
-		
-		if(blockHash.length != 32)
-			throw "Invalid block hash length. It should be 32 bytes.";
-		
-		block.setSignature(uint8_hex(api.sign(blockHash)));
-		block.setAccount(keys[current].account);
-		
-		logger.log("Block " + block.getHash(true) + " signed.");
-	}
-	
-	/**
-	 * Verifies a block signature given its hash, sig and XRB account
-	 * 
-	 * @param {string} blockHash - 32 byte hex encoded block hash
-	 * @param {string} blockSignature - 64 byte hex encoded signature
-	 * @param {string} account - A XRB account supposed to have signed the block
-	 * @returns {boolean}
-	 */
-	api.verifyBlockSignature = function(blockHash, blockSignature, account)
-	{
-		var pubKey = hex_uint8(keyFromAccount(account));
-		
-		return nacl.sign.detached.verify(hex_uint8(blockHash), hex_uint8(blockSignature), pubKey);
-	}
-	
-	api.verifyBlock = function(block, acc = "")
-	{
-		var account = block.getAccount() ? block.getAccount() : acc;
-		return api.verifyBlockSignature(block.getHash(true), block.getSignature(), block.getAccount());
-	}
-	
-	/**
-	 * Returns current account balance
-	 * 
-	 * @returns {number} balance
-	 */
-	api.getBalance = function()
-	{
-		return balance ? balance : keys[current].balance;
-	}
-	
-	/**
-	 * Returns current account pending balance (not pocketed)
-	 *
-	 * @returns {number} pendingBalance
-	 */
-	api.getPendingBalance = function()
-	{
-		//return pendingBalance ? pendingBalance : keys[current].pendingBalance;
-		var am = bigInt(0);
-		for(let i in pendingBlocks)
-		{
-			if(pendingBlocks[i].getType() == 'open' || pendingBlocks[i].getType() == 'receive')
-					am = am.add(pendingBlocks[i].getAmount());
-		}
-		return am;
-	}
-	
-	api.getRepresentative = function(acc = false)
-	{
-		if(!acc)
-			return representative;
-		api.useAccount(acc);
-		return representative;
-	}
-	
-	private.setRepresentative = function(repr)
-	{
-		representative = repr;
-		keys[current].representative = repr;
-	}
-	
-	/**
-	 * Updates current account balance
-	 * 
-	 * @param {number} newBalance - The new balance in rai units
-	 */
-	private.setBalance = function(newBalance)
-	{
-		balance = bigInt(newBalance);
-		keys[current].balance = balance;
-	}
-	
-	private.setPendingBalance = function(newBalance)
-	{
-		pendingBalance = bigInt(newBalance);
-		keys[current].pendingBalance = pendingBalance;
-	}
-	
-	api.getAccountBalance = function(acc)
-	{
-		api.useAccount(acc);
-		return api.getBalanceUpToBlock(0);
-	}
-	
-	api.getWalletPendingBalance = function()
-	{
-		var pending = bigInt(0);
-		for(let i in walletPendingBlocks)
-		{
-			if(walletPendingBlocks[i].getType() == 'open' || walletPendingBlocks[i].getType() == 'receive')
-				pending = pending.add(walletPendingBlocks[i].getAmount());
-		}
-		return pending;
-	}
-	
-	api.getWalletBalance = function()
-	{
-		var bal = bigInt(0);
-		var temp;
-		for(let i in keys)
-		{
-			temp = keys[i].balance;
-			bal = bal.add(temp);
-		}
-		return bal;
-	}
-	
-	api.recalculateWalletBalances = function()
-	{
-		for(let i in keys)
-		{
-			api.useAccount(keys[i].account);
-			private.setBalance(api.getBalanceUpToBlock(0));
-		}
-	}
-	
-	api.getBalanceUpToBlock = function(blockHash)
-	{
-		if(chain.length <= 0)
-			return 0;
-		
-		var sum = bigInt(0);
-		var found = blockHash === 0 ? true : false;
-		var blk;
-		
-		// check pending blocks first
-		for(let i = pendingBlocks.length - 1; i >= 0; i--)
-		{
-			blk = pendingBlocks[i];
-			
-			if(blk.getHash(true) == blockHash)
-				found = true;
-			
-			if(found)
-			{
-				if(blk.getType() == 'open' || blk.getType() == 'receive')
-				{
-					sum = sum.add(blk.getAmount());
-				}
-				else if(blk.getType() == 'send')
-				{
-					sum = sum.add(blk.getBalance());
-					break;
-				}
-			}
-		}
-		
-		for(let i = chain.length - 1; i >= 0; i--)
-		{
-			blk = chain[i];
-
-			if(blk.getHash(true) == blockHash)
-				found = true;
-			
-			if(found)
-			{
-				if(blk.getType() == 'open' || blk.getType() == 'receive')
-				{
-					sum = sum.add(blk.getAmount());
-				}
-				else if(blk.getType() == 'send')
-				{
-					sum = sum.add(blk.getBalance());
-					break;
-				}
-			}
-		}
-		return sum;
-	}
-	
-	/**
-	 * Updates an account balance
-	 * 
-	 * @param {number} - The new balance in raw units
-	 * @param {string} Account - The account whose balance is being updated
-	 */
-	private.setAccountBalance = function(newBalance, acc)
-	{
-		var temp = current;
-		api.useAccount(acc);
-		private.setBalance(newBalance);
-		api.useAccount(keys[temp].account);
-	}
-	
-	private.sumAccountPending = function(acc, amount)
-	{
-		var temp = current;
-		api.useAccount(acc);
-		private.setPendingBalance(api.getPendingBalance().sum(amount));
-		api.useAccount(keys[temp].account);
-	}
-	
-	api.setLabel = function(acc, label)
-	{
-		for(let i in keys)
-		{
-			if(keys[i].account == acc)
-			{
-				keys[i].label = label;
-				return true;
-			}
-		}
-		return false;
-	}
-	
-	api.removePendingBlocks = function()
-	{
-		pendingBlocks = [];
-	}
-	
-	api.removePendingBlock = function(blockHash)
-	{
-		var found = false;
-		for(let i in pendingBlocks)
-		{
-			let tmp = pendingBlocks[i];
-			if(tmp.getHash(true) == blockHash)
-			{
-				pendingBlocks.splice(i, 1);
-				found = true;
-			}
-		}
-		if(!found)
-		{
-			console.log("Not found");
-			return;
-		}
-		for(let i in walletPendingBlocks)
-		{
-			let tmp = walletPendingBlocks[i];
-			if(tmp.getHash(true) == blockHash)
-			{
-				walletPendingBlocks.splice(i, 1);
-				return;
-			}
-		}
-	}
-	
-	api.getBlockFromHash = function(blockHash, acc = 0)
-	{
-		var found = false;
-		var i = 0;
-		if(acc !== 0)
-			api.useAccount(acc);
-		else
-			api.useAccount(keys[0].account);
-			
-		for(let i = 0; i < keys.length; i++)
-		{
-			api.useAccount(keys[i].account);
-			for(let j = chain.length - 1; j >= 0; j--)
-			{
-				var blk = chain[j];
-				if(blk.getHash(true) == blockHash)
-					return blk;
-			}
-			if(i == keys.length - 1)
-				break;
-			api.useAccount(keys[i + 1].account);
-		}
-		return false;
-	}
-	
-	api.addBlockToReadyBlocks = function(blk)
-	{
-		readyBlocks.push(blk);
-		logger.log("Block ready to be broadcasted: " +blk.getHash(true));
-	}
-	
-	api.addPendingSendBlock = function(from, to, amount = 0)
-	{
-		api.useAccount(from);
-		amount = bigInt(amount);
-		
-		var bal = api.getBalanceUpToBlock(0);
-		var remaining = bal.minus(amount);
-		var blk = new Block();
-		
-		blk.setSendParameters(lastPendingBlock, to, remaining);
-		blk.build();
-		api.signBlock(blk);
-		blk.setAmount(amount);
-		blk.setAccount(from);
-		
-		lastPendingBlock = blk.getHash(true);
-		keys[current].lastPendingBlock = lastPendingBlock;
-		private.setBalance(remaining);
-		pendingBlocks.push(blk);
-		walletPendingBlocks.push(blk);
-		private.save();
-		
-		// check if we have received work already
-		var worked = false;
-		for(let i in remoteWork)
-		{
-			if(remoteWork[i].hash == blk.getPrevious())
-			{
-				if(remoteWork[i].worked)
-				{
-					worked = api.updateWorkPool(blk.getPrevious(), remoteWork[i].work);
-					break;
-				}
-			}
-		}
-		if(!worked)
-			api.workPoolAdd(blk.getPrevious(), from, true);
-		api.workPoolAdd(blk.getHash(true), from);
-		
-		logger.log("New send block waiting for work: " + blk.getHash(true));
-		
-		return blk;
-
-	}
-	
-	api.addPendingReceiveBlock = function(sourceBlockHash, acc, from, amount = 0)
-	{
-		amount = bigInt(amount);
-		api.useAccount(acc);
-		if(amount.lesser(minimumReceive))
-		{
-			logger.log("Receive block rejected due to minimum receive amount (" + sourceBlockHash + ")");
-			return false;
-		}
-		
-		// make sure this source has not been redeemed yet
-		for(let i in walletPendingBlocks)
-		{
-			if(walletPendingBlocks[i].getSource() == sourceBlockHash)
-				return false;
-		}
-		
-		for(let i in readyBlocks)
-		{
-			if(readyBlocks[i].getSource() == sourceBlockHash)
-				return false;
-		}
-		
-		for(let i in chain)
-		{
-			if(chain[i].getSource() == sourceBlockHash)
-				return false;
-		}
-		
-		var blk = new Block();
-		if(lastPendingBlock.length == 64)
-			blk.setReceiveParameters(lastPendingBlock, sourceBlockHash);
-		else
-			blk.setOpenParameters(sourceBlockHash, acc, raiwalletdotcomRepresentative);
-		
-		blk.build();
-		api.signBlock(blk);
-		blk.setAmount(amount);
-		blk.setAccount(acc);
-		blk.setOrigin(from);
-		
-		lastPendingBlock = blk.getHash(true);
-		keys[current].lastPendingBlock = lastPendingBlock;
-		pendingBlocks.push(blk);
-		walletPendingBlocks.push(blk);
-		private.setPendingBalance(api.getPendingBalance().add(amount));
-		private.save();
-		
-		// check if we have received work already
-		var worked = false;
-		for(let i in remoteWork)
-		{
-			if(remoteWork[i].hash == blk.getPrevious())
-			{
-				if(remoteWork[i].worked)
-				{
-					worked = api.updateWorkPool(blk.getPrevious(), remoteWork[i].work);
-					break;
-				}
-			}
-		}
-		if(!worked)
-			api.workPoolAdd(blk.getPrevious(), acc, true);
-		api.workPoolAdd(blk.getHash(true), acc);
-		
-		logger.log("New receive block waiting for work: " + blk.getHash(true));
-		
-		return blk;
-	}
-	
-	api.addPendingChangeBlock = function(acc, repr)
-	{
-		api.useAccount(acc);
-		
-		if(!lastPendingBlock)
-			throw "There needs to be at least 1 block in the chain.";
-		
-		var blk = new Block();
-		blk.setChangeParameters(lastPendingBlock, repr);
-		blk.build();
-		api.signBlock(blk);
-		blk.setAccount(acc);
-		
-		lastPendingBlock = blk.getHash(true);
-		keys[current].lastPendingBlock = lastPendingBlock;
-		pendingBlocks.push(blk);
-		walletPendingBlocks.push(blk);
-		private.save();
-		
-		// check if we have received work already
-		var worked = false;
-		for(let i in remoteWork)
-		{
-			if(remoteWork[i].hash == blk.getPrevious())
-			{
-				if(remoteWork[i].worked)
-				{
-					worked = api.updateWorkPool(blk.getPrevious(), remoteWork[i].work);
-					break;
-				}
-			}
-		}
-		if(!worked)
-			api.workPoolAdd(blk.getPrevious(), acc, true);
-		api.workPoolAdd(blk.getHash(true), acc);
-		
-		logger.log("New change block waiting for work: " + blk.getHash(true));
-		
-		return blk;
-	}
-	
-	api.getPendingBlocks = function()
-	{
-		return pendingBlocks;
-	}
-	
-	api.getPendingBlockByHash = function(blockHash)
-	{
-		for(let i in walletPendingBlocks)
-		{
-			if(walletPendingBlocks[i].getHash(true) == blockHash)
-				return walletPendingBlocks[i];
-		}
-		return false;
-	}
-	
-	api.getNextWorkBlockHash = function(acc)
-	{
-		var aux = current;
-		api.useAccount(acc);
-		
-		if(lastBlock.length > 0)
-			return lastBlock;
-		else
-			return uint8_hex(pk);
-		api.useAccount(keys[current].account);
-	}
-	
-	private.setLastBlockHash = function(blockHash)
-	{
-		lastBlock = blockHash;
-		keys[current].lastBlock = blockHash;
-	}
-	
-	api.workPoolAdd = function(hash, acc, needed = false, work = false)
-	{
-		for(let i in remoteWork)
-			if(remoteWork[i].hash == hash)
-				return;
-		
-		if(work !== false)
-		{
-			remoteWork.push({hash: hash, worked: true, work: work, requested: true, needed: needed,  account: acc});
-		}
-		else
-		{
-			remoteWork.push({hash: hash, work: "", worked: false, requested: false, needed: needed, account: acc});
-			logger.log("New work target: " + hash);
-		}
-	}
-	
-	api.getWorkPool = function()
-	{
-		return remoteWork;
-	}
-	
-	api.setWorkRequested = function(hash)
-	{
-		for(let i in remoteWork)
-		{
-			if(remoteWork[i].hash == hash)
-			{
-				remoteWork[i].requested = true;
-				break;
-			}
-		}
-	}
-	
-	api.setWorkNeeded = function(hash)
-	{
-		for(let i in remoteWork)
-		{
-			if(remoteWork[i].hash == hash)
-			{
-				remoteWork[i].needed = true;
-				break;
-			}
-		}
-	}
-    
-    api.checkWork = function(hash, work)
-    {
-		var t = hex_uint8(MAIN_NET_WORK_THRESHOLD);
-    	var context = blake2bInit(8, null);
-      	blake2bUpdate(context, hex_uint8(work).reverse());
-		blake2bUpdate(context, hex_uint8(hash));
-      	var threshold = blake2bFinal(context).reverse();
-		
-		if(threshold[0] == t[0])
-			if(threshold[1] == t[1])
-				if(threshold[2] == t[2])
-					if(threshold[3] >= t[3])
-						return true;
-		return false;
-    }
-	
-	api.updateWorkPool = function(hash, work)
-	{
-		var found = false;
-		if(!api.checkWork(work, hash))
-		{
-			logger.warn("Invalid PoW received ("+work+") ("+hash+").");
-			return false;
-		}
-		
-		for(let i in remoteWork)
-		{
-			if(remoteWork[i].hash == hash)
-			{
-				remoteWork[i].work = work;
-				remoteWork[i].worked = true;
-				remoteWork[i].requested = true;
-				remoteWork[i].needed = false;
-				
-				found = true;
-				for(let j in walletPendingBlocks)
-				{
-					if(walletPendingBlocks[j].getPrevious() == hash)
-					{
-						logger.log("Work received for block "+walletPendingBlocks[j].getHash(true)+" previous: "+hash);
-						walletPendingBlocks[j].setWork(work);
-						var aux = walletPendingBlocks[j];
-						try{
-							api.confirmBlock(aux.getHash(true));
-							remoteWork.splice(i, 1);
-							api.setWorkNeeded(aux.getHash(true));
-							return true;
-						}catch(e){
-							logger.error("Error adding block "+aux.getHash(true)+" to chain: " + e.message);
-							errorBlocks.push(aux)
-						}
-						break;
-					}
-				}
-				break;
-			}
-		}
-		
-		if(!found)
-		{
-			logger.warn("Work received for missing target: " + hash);
-			// add to work pool just in case, it may be a cached from the last block
-			api.workPoolAdd(hash, "", false, work);
-		}
-		return false;
-	}
-	
-	api.checkWork = function(work, blockHash)
-    {
-		var t = hex_uint8(MAIN_NET_WORK_THRESHOLD);
-    	var context = blake2bInit(8, null);
-      	blake2bUpdate(context, hex_uint8(work).reverse());
-		blake2bUpdate(context, hex_uint8(blockHash));
-      	var threshold = blake2bFinal(context).reverse();
-		
-		if(threshold[0] == t[0])
-			if(threshold[1] == t[1])
-				if(threshold[2] == t[2])
-					if(threshold[3] >= t[3])
-						return true;
-		return false;
-    }
-	
-	api.waitingRemoteWork = function()
-	{
-		for(var i in remoteWork)
-		{
-			if(!remoteWork[i].worked)
-				return true;
-		}
-		return false;
-	}
-	
-	api.getReadyBlocks = function()
-	{
-		return readyBlocks;	
-	}
-	
-	api.getNextReadyBlock = function()
-	{
-		if(readyBlocks.length > 0)
-			return readyBlocks[0];
-		else
-			return false;
-	}
-	
-	api.getReadyBlockByHash = function(blockHash)
-	{
-		for(let i in pendingBlocks)
-		{
-			if(readyBlocks[i].getHash(true) == blockHash)        
-			{
-				return readyBlocks[i];
-			}
-		}
-		return false;
-	}
-	
-	api.removeReadyBlock = function(blockHash)
-	{
-		for(let i in readyBlocks)
-		{
-			if(readyBlocks[i].getHash(true) == blockHash)
-			{
-				var blk = readyBlocks[i];
-				readyBlocks.splice(i, 1);
-				return blk;
-			}
-		}
-		return false;
-	}
-	
-	/**
-	 * Adds block to account chain
-	 *
-	 * @param {string} - blockHash The block hash
-	 * @throws An exception if the block is not found in the ready blocks array
-	 * @throws An exception if the previous block does not match the last chain block 
-	 * @throws An exception if the chain is empty and the block is not of type open 
-	 */
-	api.confirmBlock = function(blockHash)
-	{
-		var blk = api.getPendingBlockByHash(blockHash);
-		if(blk)
-		{
-			if(blk.ready())
-			{
-				api.useAccount(blk.getAccount());
-				if(chain.length == 0) 
-				{
-					// open block
-					if(blk.getType() != 'open')
-						throw "First block needs to be 'open'.";
-					chain.push(blk);
-					readyBlocks.push(blk);
-					api.removePendingBlock(blockHash);
-					private.setPendingBalance(api.getPendingBalance().minus(blk.getAmount()));
-					private.setBalance(api.getBalance().add(blk.getAmount()));
-					private.save();
-				}
-				else
-				{
-					if(blk.getPrevious() == chain[chain.length - 1].getHash(true))
-					{
-						if(blk.getType() == 'receive')
-						{
-							private.setPendingBalance(api.getPendingBalance().minus(blk.getAmount()));
-							private.setBalance(api.getBalance().add(blk.getAmount()));
-						}
-						else if(blk.getType() == 'send')
-						{
-							// check if amount sent matches amount actually being sent
-							var real = api.getBalanceUpToBlock(blk.getPrevious());
-							if(blk.isImmutable())
-							{
-								blk.setAmount(real.minus(blk.getBalance('dec')));
-							}
-							else if(real.minus(blk.getBalance('dec')).neq(blk.getAmount()))
-							{
-								logger.error('Sending incorrect amount ('+blk.getAmount().toString()+') (' + (real.minus(blk.getBalance('dec')).toString() ) +')' );
-								api.recalculateWalletBalances();
-								throw "Incorrect send amount.";
-							}
-						}
-						else if(blk.getType() == 'change')
-						{
-							// TODO
-							private.setRepresentative(blk.getRepresentative());
-						}
-						else
-							throw "Invalid block type";
-						chain.push(blk);
-						readyBlocks.push(blk);
-						api.removePendingBlock(blockHash);
-						api.recalculateWalletBalances();
-						private.save();
-					}
-					else
-					{
-						console.log(blk.getPrevious() + " " + chain[chain.length - 1].getHash(true));
-						logger.warn("Previous block does not match actual previous block");
-						throw "Previous block does not match actual previous block";
-					}
-				}
-				logger.log("Block added to chain: " + blk.getHash(true));
-			}
-			else
-			{
-				logger.error("Trying to confirm block without signature or work.");
-				throw "Block lacks signature or work.";
-			}
-		}
-		else
-		{
-			logger.warn("Block trying to be confirmed has not been found.");
-			throw 'Block not found';
-		}
-	}
-	
-	api.importBlock = function(blk, acc)
-	{
-		api.useAccount(acc);
-		blk.setAccount(acc);
-		if(!blk.ready())
-			throw "Block should be complete.";
-		
-		lastPendingBlock = blk.getHash(true);
-		keys[current].lastPendingBlock = blk.getHash(true);
-		
-		// check if there is a conflicting block pending 
-		for(let i in pendingBlocks)
-		{
-			if(pendingBlocks[i].getPrevious() == blk.getPrevious())
-			{
-				// conflict
-				private.fixPreviousChange(blk.getPrevious(), blk.getHash(true), acc);
-			}
-		}
-		
-		pendingBlocks.push(blk);
-		walletPendingBlocks.push(blk);
-		private.save();	
-		api.confirmBlock(blk.getHash(true));
-	}
-	
-	api.importForkedBlock = function(blk, acc)
-	{
-		api.useAccount(acc);
-		var prev = blk.getPrevious();
-		
-		for(let i = chain.length - 1; i >= 0; i--)
-		{
-			if(chain[i].getPrevious() == prev)
-			{
-				// fork found, delete block and its successors
-				chain.splice(i, chain.length);
-				
-				// delete pending blocks if any
-				pendingBlocks = [];
- 				
-				// import new block
-				api.importBlock(blk, acc);
-				return true;
-			}
-		}
-		return false;
-	}
-	
-	private.fixPreviousChange = function(oldPrevious, newPrevious, acc)
-	{
-		api.useAccount(acc);
-		for(let i in pendingBlocks)
-		{
-			if(pendingBlocks[i].getPrevious() == oldPrevious)
-			{
-				var oldHash = pendingBlocks[i].getHash(true);
-				pendingBlocks[i].changePrevious(newPrevious);
-				var newHash = pendingBlocks[i].getHash(true);
-				lastPendingBlock = newHash;
-				private.fixPreviousChange(oldHash, newHash, acc);
-			}
-		}
-	}
-	
-	private.save = function()
-	{
-		// save current account status
-		keys[current].balance = balance;
-		keys[current].pendingBalance = pendingBalance;
-		keys[current].lastBlock = lastBlock;
-		keys[current].chain = chain;
-		keys[current].pendingBlocks = pendingBlocks;
-		keys[current].representative = representative;
-	}
-	
-	/**
-	 * Encrypts an packs the wallet data in a hex string
-	 * 
-	 * @returns {string}
-	 */
-	api.pack = function()
-	{
-		var pack = {};
-		var tempKeys = [];
-		for(var i in keys)
-		{
-			var aux = {};
-			aux.priv = uint8_hex(keys[i].priv);
-			aux.pub = uint8_hex(keys[i].pub);
-			aux.account = keys[i].account;
-			aux.balance = keys[i].balance.toString();
-			aux.pendingBalance = keys[i].pendingBalance.toString();
-			aux.lastBlock = keys[i].lastBlock;
-			aux.pendingBlocks = [];
-			aux.chain = [];
-			aux.representative = keys[i].representative;
-			aux.label = keys[i].label;
-			
-			for(let j in keys[i].chain)
-			{
-				aux.chain.push(keys[i].chain[j].getEntireJSON());
-			}
-			tempKeys.push(aux);
-		}
-		pack.readyBlocks = []
-		
-		for(let i in readyBlocks)
-		{
-			pack.readyBlocks.push(readyBlocks[i].getEntireJSON());
-		}
-		pack.keys = tempKeys;
-		pack.seed = uint8_hex(seed);
-		pack.last = lastKeyFromSeed;
-		pack.recent = recentTxs;
-		pack.remoteWork = remoteWork;
-		pack.autoWork = autoWork;
-		pack.minimumReceive = minimumReceive.toString();
-		
-		pack = JSON.stringify(pack);
-		pack = stringToHex(pack);
-		pack = new Buffer(pack, 'hex');
-		
-		var context = blake2bInit(32);
-		blake2bUpdate(context, pack);
-		checksum = blake2bFinal(context);
-		
-		var salt = new Buffer(nacl.randomBytes(16));
-		var key = pbkdf2.pbkdf2Sync(passPhrase, salt, iterations, 32, 'sha1');
-		
-		
-		var options = { mode: AES.CBC, padding: Iso10126 };
-		var encryptedBytes = AES.encrypt(pack, key, salt, options);
-		
-		
-		var payload = Buffer.concat([new Buffer(checksum), salt, encryptedBytes]);
-		return payload.toString('hex');
-	}
-	
-	/**
-	 * Constructs the wallet from an encrypted base64 encoded wallet
-	 * 
-	 */
-	api.load = function(data)
-	{
-		var bytes = new Buffer(data, 'hex');
-		checksum = bytes.slice(0, 32);
-		var salt = bytes.slice(32, 48);
-		var payload = bytes.slice(48);
-		var key = pbkdf2.pbkdf2Sync(passPhrase, salt, iterations, 32, 'sha1');
-		
-		var options = {};
-		options.padding = options.padding || Iso10126;
-		var decryptedBytes = AES.decrypt(payload, key, salt, options);
-		
-		var context = blake2bInit(32);
-		blake2bUpdate(context, decryptedBytes);
-		var hash = uint8_hex(blake2bFinal(context));
-		
-		if(hash != checksum.toString('hex').toUpperCase())
-			throw "Wallet is corrupted or has been tampered.";
-		
-		var walletData = JSON.parse(decryptedBytes.toString('utf8'));
-		
-		seed = hex_uint8(walletData.seed);
-		lastKeyFromSeed = walletData.last;
-		recentTxs = walletData.recent;
-		remoteWork = [];
-		autoWork = walletData.autoWork;
-		readyBlocks = [];
-		minimumReceive = walletData.minimumReceive != undefined ? bigInt(walletData.minimumReceive) : bigInt("1000000000000000000000000");
-		
-		for(let i in walletData.readyBlocks)
-		{
-			var blk = new Block();
-			blk.buildFromJSON(walletData.readyBlocks[i]);
-			readyBlocks.push(blk);
-		}
-		
-		for(let i in walletData.keys)
-		{
-			var aux = {};
-			
-			aux.chain = [];
-			for(let j in walletData.keys[i].chain)
-			{
-				let blk = new Block();
-				blk.buildFromJSON(walletData.keys[i].chain[j]);
-				aux.chain.push(blk);
-			}
-			
-			aux.priv = hex_uint8(walletData.keys[i].priv);
-			aux.pub = hex_uint8(walletData.keys[i].pub);
-			aux.account = walletData.keys[i].account;
-			aux.balance = bigInt(walletData.keys[i].balance ? walletData.keys[i].balance : 0);
-			aux.lastBlock = aux.chain.length > 0 ? aux.chain[aux.chain.length - 1].getHash(true) : "";
-			aux.lastPendingBlock = aux.lastBlock;
-			aux.pendingBalance = bigInt(walletData.keys[i].pendingBalance ? walletData.keys[i].pendingBalance : 0);
-			aux.pendingBlocks = [];
-			aux.representative = walletData.keys[i].representative != undefined ? walletData.keys[i].representative : aux.account;
-			aux.label = walletData.keys[i].label != undefined ? walletData.keys[i].label : "";
-				
-			keys.push(aux);
-			if(lastPendingBlock.length == 64)
-				api.workPoolAdd(lastPendingBlock, aux.account, true);
-		}
-		api.useAccount(keys[0].account);
-		api.recalculateWalletBalances();
-		ciphered = false;
-		return walletData;
-	}
-	
-	api.createWallet = function(setSeed = false)
-	{
-		if(!setSeed)
-			seed = nacl.randomBytes(32);
-		else
-			api.setSeed(setSeed);
-		api.newKeyFromSeed();
-		api.useAccount(keys[0].account);
-		return uint8_hex(seed);
-	}
-	
-	
-	return api;    
-}
-
-
-
-
-
-},{"./Block":1,"assert":18,"buffer":51,"crypto":60,"pbkdf2":118}],3:[function(require,module,exports){
-var RaiWallet = require('../Wallet');
-var Block = require('../Block.js');
+var RaiWallet = require('rai-wallet');
+var Wallet = RaiWallet.Wallet;
+var Block = RaiWallet.Block;
 var wallet;
 var registered = false;
 var lastRetrieved = 0;
@@ -2069,1270 +17,1150 @@ var signOutInterval = 30;
 
 var RESOLVE_FORKS_BLOCK_BATCH_SIZE = 20;
 
-$(document).ready(function(){
-	
-	
-	function toast(title, msg)
-	{
-		$.toast({
-			heading: title,
-			text: msg,
-			position: 'bottom-right',
-			stack: false,
-			hideAfter: 10000,
-			loader: false
-		});
-	}
-	
-	function alertError(msg)
-	{
-		$.toast({
-			heading: 'Error',
-			text: msg,
-			icon: 'error',
-			position: 'bottom-right',
-			hideAfter: 10000,
-			loader: false
-		})
-	}
-	
-	function alertSuccess(msg)
-	{
-		$.toast({
-			heading: 'Success',
-			text: msg,
-			icon: 'success',
-			position: 'bottom-right',
-			hideAfter: 10000,
-			loader: false
-		})
-	}
-	
-	function alertInfo(msg)
-	{
-		$.toast({
-			text: msg,
-			icon: 'info',
-			position: 'bottom-right',
-			hideAfter: 10000,
-			loader: false
-		})
-	}
-	
-	function alertWarning(msg)
-	{
-		$.toast({
-			text: msg,
-			icon: 'warning',
-			position: 'bottom-right',
-			hideAfter: 10000,
-			loader: false
-		})
-	}
-	
-	$(window).scroll(function(){
-		if($(window).scrollTop() >= $(document).height() - $(window).height() - 60)
-		{
-			if(active == 'transactions' && !bottomReached && !loadingTxs)
-			{
-				loadingTxs = true;
-				var blks = wallet.getLastNBlocks(parseXRBAccount($('#acc-select').val()), 10, txsOffset);
-				if(blks.length > 0)
-				{
-					txsOffset += blks.length;
-					for(let i in blks)
-					{
-						addBlockToGui(blks[i]);
-					}
-				}
-				else
-					bottomReached = true;
-				loadingTxs = false;
-			}
-		}
-	}); 
-	
-	$('#refreshdebug').click(function(){
-		var logs = logger.getLogs();
+$(document).ready(function () {
 
-		$('#debug-box').html('');
-		$('#ready-blocks').html('');
-		$('#pending-blocks').html('');
-		
-		for(let i in logs)
-			$('#debug-box').append(logs[i]+'<br/>');
-		for(let i in logger.getWarnings())
-			$('#debug-box').append(logger.getWarnings()[i]+'<br/>');
-		for(let i in logger.getErrors())
-			$('#debug-box').append(logger.getErrors()[i]+'<br/>');
-		
-		var pendingblks = wallet.getPendingBlocks();
-		for(let i in pendingblks)
-			$('#pending-blocks').append(pendingblks[i].getJSONBlock());
-		
-		var readyblks = wallet.getReadyBlocks();
-		for(let i in pendingblks)
-			$('#ready-blocks').append(readyblks[i].getJSONBlock());
-	});
-	
-	function addAccountToGUI(accountObj)
-	{
-		var label_txt = "";
-		var label_txt2 = "";
-		if(accountObj.label !== undefined && accountObj.label != "")
-		{
-			label_txt = accountObj.label;
-			label_txt2 = '('+label_txt+') - ';
-		}
-		
-		var li = document.createElement('LI');
-		var row = document.createElement('DIV');
-		row.className += ' row';
-		
-		var _1 = document.createElement('DIV');
-		_1.className += ' col-xs-12';
-		if(label_txt == "")
-			_1.className += ' hidden';
-		
-		var input = document.createElement('input');
-		input.setAttribute('data-account', accountObj.account);
-		input.type = "text";
-		input.value = label_txt;
-		input.className += ' label-input';
-		input.placeholder = 'e.g.: RaiGames dep. address';
-		input.spellcheck = false;
-		var pencil = document.createElement('I');
-		pencil.setAttribute('aria-hidden', 'true');
-		pencil.className += ' fa fa-pencil cstm-pencil';
-		_1.appendChild(input);
-		_1.appendChild(pencil);
-		row.appendChild(_1);
-		
-		var _2 = document.createElement('DIV');
-		_2.className += 'col-xs-12';
-		
-		var span = document.createElement('SPAN');
-		var txt = document.createTextNode(accountObj.account);
-		span.appendChild(txt);
-		_2.appendChild(span);
-		row.appendChild(_2);
-		li.appendChild(row);
-		document.querySelector('.accounts ul').appendChild(li);
-		
-		if(label_txt == "")
-		{
-			li.addEventListener('click', function(){
-				showLabelInput(_1);
-			});
-		}
-		input.addEventListener('change', function(){
-			updateAccountLabel(accountObj.account, input);
-		});
-		
-		
-		$('#send-select').append('<option class="acc_select_'+accountObj.account+'">'+label_txt2+accountObj.account+' ('+(accountObj.balance / 1000000).toFixed(6)+' XRB)</option>');
-		$('#receive-select').append('<option class="acc_select_'+accountObj.account+'">'+label_txt2+accountObj.account+' ('+(accountObj.balance / 1000000).toFixed(6)+' XRB)</option>');
-		$('#change-select').append('<option>'+label_txt2+accountObj.account+'</option>');
-		$('#acc-select').append('<option>'+label_txt2+accountObj.account+'</option>');
-	}
-	
-	function showLabelInput(_1)
-	{
-		if($(_1).hasClass('hidden'))
-		{
-			$(_1).fadeOut(0).removeClass('hidden');
-			$(_1).fadeIn();
-		}
-	}
-	
-	function updateAccountLabel(acc, input)
-	{
-		var val = input.value;
-		if(val == "" && !$(input).hasClass('hidden'))
-		{
-			$(input).parent().fadeOut(1000, function(){input.addClass('hidden')});
-		}
-		if (wallet.setLabel(acc, val))
-		{
-			sync();
-			alertInfo('Label updated');
-		}
-	}
-	
-	function addRecentRecToGui(txObj)
-	{
-		if(recentEmpty)
-			$('.recent').html('');
-		recentEmpty = false;
-		$('.recent').append('<ul id="'+txObj.hash+'"><li><div class="row">'+
-								'<div class="col-xs-3">'+
-									'<b class="green">Received</b>'+
-								'</div>'+
-								'<div class="col-xs-4"><a href="https://raiblocks.net/block/index.php?h='+txObj.hash+'" target="_blank">'+txObj.hash.substring(0,20)+'....</a></div>'+
-								'<div class="col-xs-5 text-right">'+
-									'<span class="green">'+(txObj.amount.over("1000000000000000000000000").toJSNumber() / 1000000).toFixed(8)+'</span> XRB'+
-								'</div>'+
-							'</div></li></ul>');
-	}
-	
-	function removeRecentFromGui(hash)
-	{
-		var elem = $('.recent').find('#'+hash);
-		
-		refreshBalances();
-		
-		elem.fadeOut(1500, function(){elem.remove()});
-	}
-	
-	function addRecentSendToGui(txObj)
-	{
-		if(recentEmpty)
-			$('.recent').html('');
-		recentEmpty = false;
-		$('.recent').append('<ul id="'+txObj.hash+'"><li><div class="row">'+
-								'<div class="col-xs-3">'+
-									'<b class="red">Sent</b>'+
-								'</div>'+
-								'<div class="col-xs-3">'+txObj.date+'</div>'+
-								'<div class="col-xs-6 text-right">'+
-									'<span class="red">'+(txObj.amount.over("1000000000000000000000000").toJSNumber() / 1000000).toFixed(8)+'</span> XRB'+
-								'</div>'+
-							'</div></li></ul>');
-	}
-	
-	function addRecentChangeToGui(txObj)
-	{
-		if(recentEmpty)
-			$('.recent').html('');
-		recentEmpty = false;
-		$('.recent').append('<ul id="'+txObj.hash+'"><li><div class="row">'+
-								'<div class="col-xs-3">'+
-									'<b class="change">Change</b>'+
-								'</div>'+
-								'<div class="col-xs-9">'+txObj.representative.substring(0,25)+' ....</div>'+
-							'</div></li></ul>');
-	}
-	
-	function emptyRecent()
-	{
-		recentEmpty = true;
-		$('.recent').append('<div class="row"><div class="col-xs-12" style="color:#888">There is nothing to show here.</div></div>');
-	}
-	
-	function refreshBalances()
-	{
-		var balance = wallet.getWalletBalance();
-		var pending = wallet.getWalletPendingBalance();
-		
-		$('#pending').html((pending.over("1000000000000000000000000").toJSNumber() / 1000000).toFixed(6));
-		$('#balance').html((balance.over("1000000000000000000000000").toJSNumber() / 1000000).toFixed(6));
-		
-		var accs = wallet.getAccounts();
-		for(let i in accs)
-		{
-			var acc = accs[i].account;
-			var bal = accs[i].balance;
-			var label = accs[i].label;
-			if(label == "")
-				$('select').find('.acc_select_'+acc).html(acc+' ('+(bal.over("1000000000000000000000000").toJSNumber() / 1000000).toFixed(6)+' XRB)');
-			else
-				$('select').find('.acc_select_'+acc).html('('+label+') - '+acc+' ('+(bal.over("1000000000000000000000000").toJSNumber() / 1000000).toFixed(6)+' XRB)');
-		}
-	}
-	
-	function sync()
-	{
-		$.post('ajax.php', 'action=sync&data='+wallet.pack(), function(data){
-			data = JSON.parse(data);
-			if(data.status == 'redirect')
-			{
-				window.location.href=data.location;
-			}
-		});
-	}
-	
-	function recheckWork()
-	{
-		var pool = wallet.getWorkPool();
-		var batch = [];
-		
-		for(let i in pool)
-		{
-			if(!pool[i].requested || pool[i].needed)
-			{
-				batch.push(pool[i].hash);
-			}
-		}
-		
-		if(batch.length > 0)
-		{
-			if(batch.length > 1)
-			{
-				$.post('ajax.php', 'action=batchWork&batch='+JSON.stringify(batch), function(data){
-					data = JSON.parse(data);
-					if(data.status == 'success')
-					{
-						console.log('Work requested for blocks ', batch);
-						for(let i in data.workRes)
-						{
-							var work = data.workRes[i].work;
-							var hash = data.workRes[i].hash;
-							if(data.work != false)
-								wallet.updateWorkPool(hash, work);
-							else
-								wallet.setWorkNeeded(hash);
-						}
-					}
-					else if(data.status == 'redirect')
-					{
-						window.location.href=data.location;
-					}
-				});
-			}
-			else
-				remoteWork(batch[0]);
-		}
-		setTimeout(recheckWork, 5000);
-	}
-	
-	function broadcastBlock(blk)
-	{
-		var json = blk.getJSONBlock();
-		var obj = JSON.parse(json);
-		var hash = blk.getHash(true);
-		var guiHash;
-		if(blk.getType() == 'open' || blk.getType() == 'receive')
-			guiHash = blk.getSource();
-		else
-			guiHash = blk.getHash(true);
-		
-		$.post('ajax.php', 'action=broadcast&hash='+hash+"&data="+json, function(data){
-			data = JSON.parse(data);
-			if(data.status == 'success')
-			{
-				wallet.removeReadyBlock(hash);
-				removeRecentFromGui(guiHash);
-				console.log('Block broadcasted to network: '+hash);
-				alertInfo(blk.getType()+" block broadcasted to network.");
-				sync();
-				updateAccountGUI(blk.getAccount());
-			}
-			else if(data.status == 'redirect')
-			{
-				window.location.href=data.location;
-			}
-			else
-			{
-				console.warn('Error broadcasting block: '+hash+". Error: "+data.msg);
-			}
-		});
-	}
-	
-	function rebroadcastBlock(blockHash)
-	{
-		$.post('ajax.php', 'action=rebroadcast&hash='+blockHash, function(data){
-			data = JSON.parse(data);
-			if(data.status == 'success')
-			{
-				alertInfo('Block rebroadcated');
-			}
-			else
-			{
-				alertError(data.msg);
-			}
-		});
-	}
-	
-	function updateAccountGUI(acc)
-	{
-		refreshChain();
-		
-		// update account balance on send and receive modals
-		var balance = wallet.getAccountBalance(acc).over("1000000000000000000000000").toJSNumber();
-		$('#sendbalance_'+acc).html(balance);
-		$('#receivebalance_'+acc).html(balance);
-	}
-	
-	function refreshChain()
-	{
-		txsOffset = 0;
-		bottomReached = false;
-		loadingTxs = false;
-		
-		var selected = parseXRBAccount($('#acc-select').val());
-		var last = wallet.getLastNBlocks(selected, 20);
-		clearBlocksFromGui();
-		
-		for(let i in last)
-			addBlockToGui(last[i]);
-		txsOffset = last.length;
-	}
-	
-	function updateReceiveQr(account = null)
-	{
-		var acc = account ? account : parseXRBAccount($('#receive-select').val());
-		var am = $('#receive-amount').val();
-		if(acc)
-			$('#qr .img').html('<img style="height: 200px; margin-left: auto; margin-right: auto;" src="https://chart.googleapis.com/chart?chs=200x200&cht=qr&chl=raiblocks:'+acc+'?amount='+am+'">')
-		$('.qr-bot').html('<code>'+acc+'</code>');
-		$('#qr').addClass('well');
-	}
-	
-	function getPendingBlocks()
-	{
-		$.post('ajax.php', 'action=getPending&last='+lastRetrieved, function(data){
-			data = JSON.parse(data);
-			if(data.status == 'success')
-			{
-				lastRetrieved = data.last > lastRetrieved ? data.last : lastRetrieved;
-				for(let i in data.data)
-				{
-					var blk = data.data[i];
-					var acc = blk.block.destination;
-					var from = blk.from;
-					if(wallet.addPendingReceiveBlock(blk.hash, acc, from, blk.amount))
-					{
-						var txObj = {account: acc, amount: blk.amount, date: blk.time, hash: blk.hash}
-						addRecentRecToGui(txObj);
-					}
-				}
-				sync();
-				refreshBalances();
-			}
-			else if(data.status == 'redirect')
-			{
-				window.location.href=data.location;
-			}
-			setTimeout(getPendingBlocks, 5000);
-		});
-	}
-	
-	function getPendingBlocks2()
-	{
-		var accs = wallet.getAccounts();
-		var accounts = [];
-		for(let i in accs)
-			accounts.push(accs[i].account);
-		$.post('ajax.php', 'action=getPending2&accounts='+JSON.stringify(accounts), function(data){
-			data = JSON.parse(data);
-			if(data.status == 'success')
-			{
-				for(var account in data.res)
-				{
-					for(let i in data.res[account].blocks)
-					{
-						var blk = data.res[account].blocks[i];
-						if(wallet.addPendingReceiveBlock(blk.hash, account, blk.from, blk.amount))
-						{
-							var txObj = {account: account, amount: bigInt(blk.amount), date: blk.from, hash: blk.hash}
-							addRecentRecToGui(txObj);
-						}
-					}
-				}
-			}
-			else if(data.status == 'redirect')
-			{
-				window.location.href=data.location;
-			}
-			setTimeout(getPendingBlocks2, 5000);
-		})
-	}
-	
-	function remoteWork(hash)
-	{
-		$.post('ajax.php', 'action=remoteWork&hash='+hash, function(data)
-		{
-			data = JSON.parse(data);
-			if(data.status == 'success')
-			{
-				console.log('Work requested for block ' + hash);
-				if(data.work != false)
-					wallet.updateWorkPool(hash, data.work);
-				else
-					wallet.setWorkNeeded(hash);
-			}
-			else if(data.status == 'redirect')
-			{
-				window.location.href=data.location;
-			}
-		});
-	}
-	
-	function getSingleWork(hash, acc)
-	{
-		if(waitingForSingleWork)
-			return;
-		waitingForSingleWork = true;
-		
-		var request = function()
-		{
-			if(waitingForSingleWork)
-			{
-				$.post('ajax.php', 'action=getSingle&hash='+hash, function(data){
-					data = JSON.parse(data);
-					if(data.status == 'success')
-					{
-						if(data.found == true)
-						{
-							if(data.worked)
-							{
-								wallet.updateWorkPool(hash, data.work);
-								waitingForSingleWork = false;
-							}
-							else
-								setTimeout(request, 3000);
-						}
-						else
-						{
-							// not found? submit it
-							remoteWork(hash);
-						}
-					}
-					else if(data.status == 'redirect')
-					{
-						window.location.href=data.location;
-					}
-					else
-						setTimeout(request, 3000);
-				});
-			}
-		}
-		request();
-	}
-	
-	function cancelWait()
-	{
-		waitingForSingleWork = false;
-	}
-  
-	function checkReadyBlocks()
-	{
-		var blk = wallet.getNextReadyBlock();
-		if(blk !== false)
-			broadcastBlock(blk);
-		setTimeout(checkReadyBlocks, 5000);
-	}
-	
-	function checkChains(callback)
-	{
-		var accs = wallet.getAccounts();
-		var lastHashes = {};
-		var forks = [];
-		var emptyAccounts = [];
-		for(let i in accs)
-		{
-			let blk = wallet.getLastNBlocks(accs[i].account, 1);
-			if(blk.length == 0)
-			{
-				emptyAccounts.push(accs[i].account);
-				continue;
-			}
-			lastHashes[accs[i].account] = blk[0].getHash(true);
-		}
-		lastHashes = JSON.stringify(lastHashes);
-		var emptyAccountsJSON = JSON.stringify(emptyAccounts);
-		$.post('ajax.php', 'action=checkChains&hashes='+lastHashes+'&emptyAccounts='+emptyAccountsJSON, function(data){
-			data = JSON.parse(data);
-			if(data.status == 'success')
-			{
-				if(data.unsynced.length > 0)
-				{
-					for(let i in data.unsynced)
-					{
-						var acc = data.unsynced[i].account;
-						if(!data.unsynced[i].forked)
-						{
-							// not forked, but there are new blocks
-							for(let j in data.unsynced[i].blocks)
-							{
-								if(j == 0 && emptyAccounts.indexOf(acc) == -1)
-									continue; // first block is already confirmed, unless its missing too :P
-								var blk = new Block();
-								blk.buildFromJSON(data.unsynced[i].blocks[j].block, blk.getMaxVersion()); 
-								if(blk.getType() == 'receive' || blk.getType() == 'open')
-									blk.setOrigin(data.unsynced[i].blocks[j].fromto);
-								blk.setImmutable(true);
-								try{
-									wallet.importBlock(blk, acc);
-									wallet.removeReadyBlock(blk.getHash(true)); // so it is not broadcasted, not necessary
-								}catch(e){
-									logger.error(e);
-								}
-							}
-						}
-						else
-						{
-							// our chain is different than the one the network has
-							forks.push(acc);
-						}
-					}
-					
-					if(forks.length > 0)
-					{
-						resolveForks(forks, callback);
-						return; // transfer callback to resolveForks (async function)
-								// we dont want the wallet to be opened with an invalid chain
-					}
-				}
-			}
-			else if(data.status == 'redirect')
-			{
-				window.location.href=data.location;
-			}
-			else
-				logger.warn('Unable check if chain is synced with network.');
-			callback();
-		});
-	}
-	
-	/* 
-	 * Basically posts local chain block hashes until server (node) returns a common one 
-	 */
-	function resolveForks(forks, callbackFunction)
-	{
-		var evaluating = 0;
-		var resolve = function(acc, offset)
-		{
-			logger.log('Resolving fork for account: ' + acc);
-			
-			var blocks = wallet.getLastNBlocks(acc, RESOLVE_FORKS_BLOCK_BATCH_SIZE, offset);
-			var payload = [];
-			for(let i in blocks)
-				payload.push(blocks[i].getHash(true));
-			
-			$.post('ajax.php', 'action=accountContains&blocks='+JSON.stringify(payload), function(data){
-				data = JSON.parse(data);
-				if(data.status == 'success')
-				{
-					if(data.forked)
-					{
-						if(data.successors.length == 1)
-						{
-							// this happens when a block is at the wallet but not at the ledger
-							// rebroadcast the rest of the blocks
-							var toRebroadcast = wallet.getBlocksUpTo(acc, data.successors[0].hash);
-							for(let i = 0; i < toRebroadcast.length; i++)
-								broadcastBlock(toRebroadcast[i]);
-							
-							// jump to next account or callback function
-							if(evaluating >= forks.length - 1)
-								callbackFunction();
-							else
-							{
-								evaluating++;
-								resolve(forks[evaluating], 0);
-							}
-						}
-						else
-						{
-							var blk = new Block();
-							blk.buildFromJSON(data.successors[1].block, blk.getMaxVersion());
-							try{
-								if(wallet.importForkedBlock(blk, acc))
-								{
-									for(let i = 2; i < data.successors.length - 1; i++)
-									{
-										var blk = new Block();
-										blk.buildFromJSON(data.successors[i].block, blk.getMaxVersion());
-										wallet.importBlock(blk, acc);
-									}
-								}
-								else
-									logger.warn('Trying to fix a fork not found :P');
-								
-								// jump to next account or callback function
-								if(evaluating >= forks.length - 1)
-									callbackFunction();
-								else
-								{
-									evaluating++;
-									resolve(forks[evaluating], 0);
-								}
-								
-							}catch(e){
-								logger.error(e);
-							}
-						}
-					}
-					else
-					{
-						// look for the fork deeper
-						if(wallet.getAccountBlockCount(acc) > offset)
-							resolve(acc, offset + RESOLVE_FORKS_BLOCK_BATCH_SIZE);
-						else
-						{
-							logger.warn('Reached chain root without finding the fork searched: ' + acc);
-							
-							// jump to next account or callback function
-							if(evaluating >= forks.length - 1)
-								callbackFunction();
-							else
-							{
-								evaluating++;
-								resolve(forks[evaluating], 0);
-							}
-						}
-					}
-				}
-				else if(data.status == 'redirect')
-				{
-					window.location.href=data.location;
-				}
-				else
-				{
-					// try again ...
-					setTimeout(function(){
-						resolve(acc, offset);
-					}, 500)
-				}
-			});
-		}
-		
-		resolve(forks[evaluating], 0);
-	}
-	
-	function debugAllWallet()
-	{
-		wallet.debug();
-		setTimeout(debugAllWallet, 3000);
-	}
-	
-	function goToWallet()
-	{
-		// stop live txs script
-		txs.stop();
-		
-		// load wallet template
-		$('.landing').html('<div class="transition-overlay"><span>RAIWALLET</span><br/><i class="fa fa-circle-o-notch fa-spin fa-fw"></i></div>');
-		$(".modal").modal('hide');
+  function toast(title, msg) {
+    $.toast({
+      heading: title,
+      text: msg,
+      position: 'bottom-right',
+      stack: false,
+      hideAfter: 10000,
+      loader: false
+    });
+  }
 
-		// load elements and display wallet
-		var accounts = wallet.getAccounts();
-		var total_balance = 0;
-		for(let i in accounts)
-		{
-			addAccountToGUI(accounts[i]);
-		}
-		$('#minimum_receive').val(wallet.getMinimumReceive().over("1000000000000000000000000"));
+  function alertError(msg) {
+    $.toast({
+      heading: 'Error',
+      text: msg,
+      icon: 'error',
+      position: 'bottom-right',
+      hideAfter: 10000,
+      loader: false
+    })
+  }
 
-		checkChains(function(){
-			refreshBalances();
-			getPendingBlocks2();
-			recheckWork();
-			checkReadyBlocks(); 
-			
-			var selected = wallet.getAccounts()[0].account;
-			var last = wallet.getLastNBlocks(selected, 20);
-			clearBlocksFromGui();
+  function alertSuccess(msg) {
+    $.toast({
+      heading: 'Success',
+      text: msg,
+      icon: 'success',
+      position: 'bottom-right',
+      hideAfter: 10000,
+      loader: false
+    })
+  }
 
-			for(let i in last)
-				addBlockToGui(last[i]);
-			txsOffset = last.length;
+  function alertInfo(msg) {
+    $.toast({
+      text: msg,
+      icon: 'info',
+      position: 'bottom-right',
+      hideAfter: 10000,
+      loader: false
+    })
+  }
 
-			lastAction = Date.now() / 1000;
-			autoSignOut();
-			$('button, li, input').click(function(){
-				lastAction = Date.now() / 1000;
-			});
-			
-			window.history.pushState("home", "RaiWallet - Home", "/home");
-			document.title = 'RaiWallet - Home';
-			
-			setTimeout(function(){
-				$('.landing').fadeOut(500, function(){$('.landing').remove(); $('.wallet-wrapper').fadeIn();});
-			}, 1000);
-		});
+  function alertWarning(msg) {
+    $.toast({
+      text: msg,
+      icon: 'warning',
+      position: 'bottom-right',
+      hideAfter: 10000,
+      loader: false
+    })
+  }
 
-	}
-	
-	$('.form-register').submit(function(){
-		// check pass
-		if($('#psw').val() == $('#psw2').val())
-		{
-			if($('#psw').val().length < 8)
-			{
-				alertError("You are going to store money, choose a stronger password :P");
-				return false;
-			}
-			
-			// create wallet and send to server
-			wallet = new RaiWallet($('#psw').val());
-			wallet.setLogger(logger);
-			var seed = wallet.createWallet();
-			var pack = wallet.pack();
-			var email = $('#email').val();
-			$('input').prop('disabled', true);
-			$.post('ajax.php', 'action=register&email='+email+'&wallet='+pack, function(data){
-				data = JSON.parse(data);
-				
-				if(data.status == 'success')
-				{
-					alertInfo('Wallet successfully registered.');
-					$('#wallet_id_reg').html(data.identifier);
-					$('#wallet_seed_reg').html(seed);
-					$('.registering').fadeOut(500, function(){
-						$('.registered').fadeIn(500);
-					});
-					registered = true;
-				}
-				else
-				{
-					alertError(data.msg);
-				}
-				$('input').prop('disabled', false);
-			});
-		}
-		else
-			alertError('Passwords do not match.');
-		
-		return false;
-		
-	});
-	
-	$('.form-login').submit(function(e){
-		e.preventDefault();
-		var wid = $('#wid').val();
-		
-		$('input').prop('disabled', true);
-		$.post('ajax.php', 'action=login&wallet_id='+wid, function(data){
-			data = JSON.parse(data);
-			
-			if(data.status == 'success')
-			{
-				// decrypt wallet and check checksum
-				wallet = new RaiWallet($('#password').val());
-				wallet.setLogger(logger);
-				$('#password').val('');
-				
-				try{
-					wallet.load(data.wallet);
-				}catch(e){
-					alertError('Error decrypting wallet. Check that the password is correct.');
-					$('input').prop('disabled', 0);
-					console.log(e);
-					return;
-				}
-				
-				if(data.alias)
-				{
-					$('#alias').val(data.alias);
-					$('#alias').prop('disabled', 1);
-					$('#change_alias').fadeOut();
-				}
-				
-				signOutInterval = data.sign_out;
-				$('#aso_time').val(signOutInterval);
-				goToWallet();
-			}
-			else
-			{
-				alertError(data.msg);
-			}
-			$('input').prop('disabled', 0);            
-		});
-		return false;
-	});
-	
-	$('.gotowallet').click(goToWallet);
-	
-	$('.form-send').submit(function(event){
-		event.preventDefault();
-		// reset field errors
-		$('#to').css('border-color', '#ccc');
-		$('#samount').css('border-color', '#ccc');
-		var error = false;
-		
-		// from
-		var from = parseXRBAccount($('#send-select').val());
-		if(from === false)
-			return alertError('Invalid origin address');
-		
-		// check address
-		var to = $('#to').val();
-		try{
-			keyFromAccount(to);
-		}catch(e){
-			alertError('Invalid XRB address.');
-			$('#to').css('border-color', '#880000');
-			error = true;
-		}
-		
-		var balance = wallet.getAccountBalance(from);
-		
-		var amount = parseFloat($('#samount').val());
-		var amountRai = parseInt(amount * 1000000);
-		var amountRaw = bigInt(amountRai).multiply("1000000000000000000000000");
-		if(amount <= 0)
-		{
-			alertError('Invalid amount.');
-			$('#samount').css('border-color', '#880000');
-			error = true;
-		}
-		
-		if(amountRaw.greater(balance))
-		{
-			alertError('Amount is greater than balance in the selected account.');
-			$('#samount').css('border-color', '#880000');
-			error = true;
-		}
-		
-		if(!error)
-		{
-			try{
-				var blk = wallet.addPendingSendBlock(from, to, amountRaw);
-				var hash = blk.getHash(true);
-				
-				refreshBalances();
-				$(".modal").modal('hide');
-				alertInfo("Transaction built successfully. Waiting for work ...");
-				addRecentSendToGui({date: "Just now", amount: amountRaw, hash: hash});
-				remoteWork(blk.getPrevious());
-			}catch(e){
-				alertError('Ooops, something happened: ' + e.message);
-			}
-				
-		}
-		return false;
-	});
-	
-	$('#generate_acc').click(function(){
-		var newAccount = wallet.newKeyFromSeed();
-		addAccountToGUI({account: newAccount, balance: 0});
-		checkChains(function(){
-			refreshBalances();
-			sync();
-			alertSuccess('New account added to wallet.');
-			wallet.useAccount(newAccount);
-			updateReceiveQr(newAccount);
-		});
-	});
-	
-	$('#change_repr').click(function(){
-		var selected = parseXRBAccount($('#change-select').val());
-		var repr = $('#acc-repr').val();
-		
-		try{
-			keyFromAccount(repr);
-		}catch(e){
-			alertError("Invalid representative account.");
-			return;
-		}
-		
-		try{
-			var blk = wallet.addPendingChangeBlock(selected, repr);
-			sync();
-			var txObj = {representative: repr, hash: blk.getHash(true)};
-			addRecentChangeToGui(txObj);
-			alertInfo("Representative changed. Waiting for work to broadcast the block.");
-		}catch(e){
-			console.log(e);
-			alertError('Something happened: ' + e);
-		}
-	});
-	
-	$('#receive-select').change(function(){
-		updateReceiveQr();
-	});
-	
-	$('#receive-amount').keyup(function(){
-		updateReceiveQr();
-	});
-	
-	$('#change-select').change(function(){
-		var selected = parseXRBAccount($('#change-select').val());
-		var repr = wallet.getRepresentative(selected);
-		$('#acc-repr').val(repr);
-	});
-	
-	
-	$('#acc-select').change(function(){
-		refreshChain();
-	});
-	
-	$('#refresh').click(function(){
-		wallet.recalculateWalletBalances();
-	});
-	
-	
-	function addBlockToGui(block, prepend = false)
-	{
-		if(prepend)
-			var func = 'prepend';
-		else
-			var func = 'append';
-		
-		if(block.getType() != 'change')
-		{
-			if(block.getType() == 'send')
-			{
-				var color = 'red';
-				var fromto = 'To: ';
-				var symbol = '-';
-				var account = block.getDestination();
-			}
-			else
-			{
-				var color = 'green';
-				var fromto = 'From: ';
-				var symbol = '+';
-				var account = block.getOrigin();
-			}
-			var type = block.getType();
-			
-			$('.txs ul')[func](
-				'<li id="tx_' + block.getHash(true) + '">'+
-					'<div class="row">'+
-						'<div class="col-sm-2">'+
-							'<span class="blk-type '+type+'">'+block.getType()+'</span><br/>'+
-							'<span class="'+color+' blk-amount">'+symbol+''+(block.getAmount().over("1000000000000000000000000").toJSNumber() / 1000000).toFixed(6)+'</span>'+
-						'</div>'+
-						'<div class="col-sm-6">'+
-							'<a href="https://raiblocks.net/block/index.php?h='+block.getHash(true)+'" target="_blank"><span class="blk-hash"> '+block.getHash(true)+'</span></a><br/>'+
-							'<b>'+fromto+'</b><span class="blk-account">'+account+'</span>'+
-						'</div>'+
-						'<div class="col-sm-4 text-center">'+
-							'<button type="button" data-toggle="tooltip" data-placement="left" title="View Block" class="btn btn-default gborder" style="margin-right:5px" onclick="$(\'.txs ul\').find(\'#json_'+block.getHash(true)+'\').fadeToggle();"><i class="fa fa-angle-down" aria-hidden="true"></i></button>'+
-							'<button type="button" data-toggle="tooltip" data-placement="right" title="Rebroadcast" class="btn btn-default gborder rebroadcast" id="rebroadcast_'+block.getHash(true)+'" ><i class="fa fa-paper-plane-o" aria-hidden="true"></i></button>'+
-						'</div>'+
-						'<div class="col-sm-12" style="display:none; margin-top:15px" id="json_'+block.getHash(true)+'">'+
-							'<pre><code>'+block.getJSONBlock(true)+'</code></pre>'+
-						'</div>'+
-					'</div>'+
-				'</li>'
-			);
-		}
-		else
-		{
-			var type = "change";
-			$('.txs ul')[func](
-				'<li id="tx_' + block.getHash(true) + '">'+
-					'<div class="row">'+
-						'<div class="col-sm-2">'+
-							'<span class="blk-type '+type+'">'+block.getType()+'</span>'+
-						'</div>'+
-						'<div class="col-sm-6">'+
-							'<a href="https://raiblocks.net/block/index.php?h='+block.getHash(true)+'" target="_blank"><span class="blk-hash"> '+block.getHash(true)+'</span></a><br/>'+
-							'<span class="blk-account">'+block.getRepresentative()+'</span>'+
-						'</div>'+
-						'<div class="col-sm-4 text-center">'+
-							'<button type="button" data-toggle="tooltip" data-placement="left" title="View Block" class="btn btn-default gborder" style="margin-right:5px" onclick="$(\'.txs ul\').find(\'#json_'+block.getHash(true)+'\').fadeToggle();"><i class="fa fa-angle-down" aria-hidden="true"></i></button>'+
-							'<button type="button" data-toggle="tooltip" data-placement="right" title="Rebroadcast" class="btn btn-default gborder rebroadcast" id="rebroadcast_'+block.getHash(true)+'" ><i class="fa fa-paper-plane-o" aria-hidden="true"></i></button>'+
-						'</div>'+	
-						'<div class="col-sm-12" style="display:none; margin-top:15px" id="json_'+block.getHash(true)+'">'+
-							'<pre><code>'+block.getJSONBlock(true)+'</code></pre>'+
-						'</div>'+
-					'</div>'+
-				'</li>'
-			);
-		}
-		$('[data-toggle="tooltip"]').tooltip(); 
-	}
-	
-	
-	$('.txs ul').on('click', '.rebroadcast', function (){
-		var hash = $(this).attr('id').replace('rebroadcast_', '');
-		rebroadcastBlock(hash);
-	});
-	
-	$('.form-minimum').submit(function(event){
-		event.preventDefault();
-		var minimum = parseInt($('#minimum_receive').val());
-		if(minimum < 0)
-		{
-			alertError('Invalid minimum amount');
-			return;
-		}
-		
-		if(wallet.setMinimumReceive(bigInt(minimum).multiply("1000000000000000000000000")))
-		{
-			sync();
-			alertInfo('Settings updated');
-		}
-		else
-		{
-			$('#minimum_receive').val(wallet.getMinimumReceive().over("1000000000000000000000000"));
-			alertError('Error updating setting. Make sure you entered a valid number in rai units.');
-		}
-	});
-	
-	$('.form-alias').submit(function(event){
-		event.preventDefault();
-		var serialize = $(this).serialize();
-		
-		$.post('ajax.php', 'action=changeAlias&'+serialize, function(data){
-			data = JSON.parse(data);
-			if(data.status == 'success')
-			{
-				alertSuccess(data.msg);
-				$('#alias').prop('disabled', true);
-				$('#change_alias').fadeOut();
-			}
-			else
-				alertError(data.msg);
-		});
-		return false;
-	});
-	
-	$('.form-autologout').submit(function(event){
-		event.preventDefault();
-		var serialize = $(this).serialize();
-		$.post('ajax.php', 'action=autologout&' + serialize, function(data){
-			data = JSON.parse(data);
-			if(data.status == 'success')
-			{
-				alertSuccess(data.msg);
-				signOutInterval = $('#aso_time').val();
-			}
-			else
-				alertError(data.msg);
-		});
-		return false;
-	});
-	
-	$('.form-recovery').submit(function(event) {
-		event.preventDefault();
-		var serialize = $(this).serialize();
-		$.post('ajax.php', 'action=recover_id&'+serialize, function(data) {
-			data = JSON.parse(data);
-			if(data.status == 'success')
-			{
-				alertSuccess(data.msg);
-			}
-			else
-				alertError(data.msg);
-		});
-		return false;
-	});
-	
-	$('.form-import').submit(function(event) {
-		event.preventDefault();
-		let s = $('#i_seed').val();
-		let p1 = $('#import_psw1').val();
-		let p2 = $('#import_psw2').val();
-		
-		if(p1 == p2) {
-			if(/^[0-9A-Fa-f]{64}$/.test(s)) {
-				// create wallet and send to server
-				wallet = new RaiWallet(p1);
-				wallet.setLogger(logger);
-				var seed = wallet.createWallet(s);
-				var pack = wallet.pack();
-				var email = $('#email-import').val();
-				
-				$('input').prop('disabled', true);
-				$.post('ajax.php', 'action=register&email='+email+'&wallet='+pack, function(data){
-					data = JSON.parse(data);
-					
-					if(data.status == 'success')
-					{
-						alertInfo('Wallet successfully registered.');
-						$('#wallet_id_import').html(data.identifier);
-						$('#wallet_seed_import').html(seed);
-						$('.importing').fadeOut(500, function(){
-							$('.imported').fadeIn(500);
-						});
-						registered = true;
-					}
-					else
-					{
-						alertError(data.msg);
-					}
-					$('input').prop('disabled', false);
-				});
-				
-			} else {
-				alertError('Invalid walled seed. It should be a hex encoded 32 byte string.');
-			}
-		} else {
-			alertError('Passwords do not match');
-		}
-		
-		return false;
-	});
-	
-	$('#seed_button').click(function(){
-		try{
-			$('#seed_backup').val(wallet.getSeed($('#seed_pass').val()));
-			$('#seed_pass').val('');
-			setTimeout(function(){
-				$('#seed_backup').val($('#seed_backup').attr('value'));
-			}, 30000);
-			alertInfo('Seed will be visible for 30 seconds.');
-		}catch(e){
-			alertError('Incorrect password');
-		}
-	});
-	
-	$('#change-pass').click(function(){
-		var old = $('#change-pass-current').val();
-		var new1 = $('#change-pass-new1').val();
-		var new2 = $('#change-pass-new2').val();
-		
-		if(new1 != new2)
-		{
-			alertError('Passwords do not match.');
-			return;
-		}
-		
-		if(new1.length < 8)
-		{
-			alertWarning("Use a safer password OMG");
-			return;
-		}
-		
-		try{
-			wallet.changePass(old, new1);
-			sync();
-			alertSuccess('Password successfully changed.');
-			old = $('#change-pass-current').val('');
-			new1 = $('#change-pass-new1').val('');
-			new2 = $('#change-pass-new2').val('');
-		}catch(e){
-			alertError(e);
-		}
-		
-	});
-	
-	$('#change-iterations').click(function(){
-		var newIterations = parseInt($('#iteration_number').val());
-		var oldIterations = wallet.getIterations();
-		if(newIterations < 500)
-		{
-			alertWarning("A greater iteration number is recommended.");
-		}
-		
-		try{
-			wallet.setIterations(newIterations);
-			$('#iteration_number').val('');
-			alertInfo("PBKDF2 iterations updated.");
-		}catch(e){
-			alertError(e);
-		}
-	});
-	
-	$('#download_wallet').click(function(){
-		var data = wallet.pack();
-		var link = document.createElement('a');
-		link.download = 'RaiWalletBackUp.dat';
-		var blob = new Blob([data], {type: 'text/plain'});
-		link.href = window.URL.createObjectURL(blob);
-		link.click();
-	});
-	
-	function clearBlocksFromGui()
-	{
-		$('.txs ul').html('');
-	}
-	
-	function autoSignOut()
-	{
-		if(Date.now() / 1000 - lastAction > 60 * signOutInterval)
-			window.location.href = '/out';
-		setTimeout(autoSignOut, 30000);
-	}
-	
+  $(window).scroll(function () {
+    if ($(window).scrollTop() >= $(document).height() - $(window).height() - 60) {
+      if (active == 'transactions' && !bottomReached && !loadingTxs) {
+        loadingTxs = true;
+        var blks = wallet.getLastNBlocks(parseXRBAccount($('#acc-select').val()), 10, txsOffset);
+        if (blks.length > 0) {
+          txsOffset += blks.length;
+          for (let i in blks) {
+            addBlockToGui(blks[i]);
+          }
+        }
+        else
+          bottomReached = true;
+        loadingTxs = false;
+      }
+    }
+  });
+
+  $('#refreshdebug').click(function () {
+    var logs = logger.getLogs();
+
+    $('#debug-box').html('');
+    $('#ready-blocks').html('');
+    $('#pending-blocks').html('');
+
+    for (let i in logs)
+      $('#debug-box').append(logs[i] + '<br/>');
+    for (let i in logger.getWarnings())
+      $('#debug-box').append(logger.getWarnings()[i] + '<br/>');
+    for (let i in logger.getErrors())
+      $('#debug-box').append(logger.getErrors()[i] + '<br/>');
+
+    var pendingblks = wallet.getPendingBlocks();
+    for (let i in pendingblks)
+      $('#pending-blocks').append(pendingblks[i].getJSONBlock());
+
+    var readyblks = wallet.getReadyBlocks();
+    for (let i in pendingblks)
+      $('#ready-blocks').append(readyblks[i].getJSONBlock());
+  });
+
+  function addAccountToGUI(accountObj) {
+    var label_txt = "";
+    var label_txt2 = "";
+    if (accountObj.label !== undefined && accountObj.label != "") {
+      label_txt = accountObj.label;
+      label_txt2 = '(' + label_txt + ') - ';
+    }
+
+    var li = document.createElement('LI');
+    var row = document.createElement('DIV');
+    row.className += ' row';
+
+    var _1 = document.createElement('DIV');
+    _1.className += ' col-xs-12';
+    if (label_txt == "")
+      _1.className += ' hidden';
+
+    var input = document.createElement('input');
+    input.setAttribute('data-account', accountObj.account);
+    input.type = "text";
+    input.value = label_txt;
+    input.className += ' label-input';
+    input.placeholder = 'e.g.: RaiGames dep. address';
+    input.spellcheck = false;
+    var pencil = document.createElement('I');
+    pencil.setAttribute('aria-hidden', 'true');
+    pencil.className += ' fa fa-pencil cstm-pencil';
+    _1.appendChild(input);
+    _1.appendChild(pencil);
+    row.appendChild(_1);
+
+    var _2 = document.createElement('DIV');
+    _2.className += 'col-xs-12';
+
+    var span = document.createElement('SPAN');
+    var txt = document.createTextNode(accountObj.account);
+    span.appendChild(txt);
+    _2.appendChild(span);
+    row.appendChild(_2);
+    li.appendChild(row);
+    document.querySelector('.accounts ul').appendChild(li);
+
+    if (label_txt == "") {
+      li.addEventListener('click', function () {
+        showLabelInput(_1);
+      });
+    }
+    input.addEventListener('change', function () {
+      updateAccountLabel(accountObj.account, input);
+    });
+
+
+    $('#send-select').append('<option class="acc_select_' + accountObj.account + '">' + label_txt2 + accountObj.account + ' (' + (accountObj.balance / 1000000).toFixed(6) + ' XRB)</option>');
+    $('#receive-select').append('<option class="acc_select_' + accountObj.account + '">' + label_txt2 + accountObj.account + ' (' + (accountObj.balance / 1000000).toFixed(6) + ' XRB)</option>');
+    $('#change-select').append('<option>' + label_txt2 + accountObj.account + '</option>');
+    $('#acc-select').append('<option>' + label_txt2 + accountObj.account + '</option>');
+  }
+
+  function showLabelInput(_1) {
+    if ($(_1).hasClass('hidden')) {
+      $(_1).fadeOut(0).removeClass('hidden');
+      $(_1).fadeIn();
+    }
+  }
+
+  function updateAccountLabel(acc, input) {
+    var val = input.value;
+    if (val == "" && !$(input).hasClass('hidden')) {
+      $(input).parent().fadeOut(1000, function () {
+        input.addClass('hidden')
+      });
+    }
+    if (wallet.setLabel(acc, val)) {
+      sync();
+      alertInfo('Label updated');
+    }
+  }
+
+  function addRecentRecToGui(txObj) {
+    if (recentEmpty)
+      $('.recent').html('');
+    recentEmpty = false;
+    $('.recent').append('<ul id="' + txObj.hash + '"><li><div class="row">' +
+      '<div class="col-xs-3">' +
+      '<b class="green">Received</b>' +
+      '</div>' +
+      '<div class="col-xs-4"><a href="https://raiblocks.net/block/index.php?h=' + txObj.hash + '" target="_blank">' + txObj.hash.substring(0, 20) + '....</a></div>' +
+      '<div class="col-xs-5 text-right">' +
+      '<span class="green">' + (txObj.amount.over("1000000000000000000000000").toJSNumber() / 1000000).toFixed(8) + '</span> XRB' +
+      '</div>' +
+      '</div></li></ul>');
+  }
+
+  function removeRecentFromGui(hash) {
+    var elem = $('.recent').find('#' + hash);
+
+    refreshBalances();
+
+    elem.fadeOut(1500, function () {
+      elem.remove()
+    });
+  }
+
+  function addRecentSendToGui(txObj) {
+    if (recentEmpty)
+      $('.recent').html('');
+    recentEmpty = false;
+    $('.recent').append('<ul id="' + txObj.hash + '"><li><div class="row">' +
+      '<div class="col-xs-3">' +
+      '<b class="red">Sent</b>' +
+      '</div>' +
+      '<div class="col-xs-3">' + txObj.date + '</div>' +
+      '<div class="col-xs-6 text-right">' +
+      '<span class="red">' + (txObj.amount.over("1000000000000000000000000").toJSNumber() / 1000000).toFixed(8) + '</span> XRB' +
+      '</div>' +
+      '</div></li></ul>');
+  }
+
+  function addRecentChangeToGui(txObj) {
+    if (recentEmpty)
+      $('.recent').html('');
+    recentEmpty = false;
+    $('.recent').append('<ul id="' + txObj.hash + '"><li><div class="row">' +
+      '<div class="col-xs-3">' +
+      '<b class="change">Change</b>' +
+      '</div>' +
+      '<div class="col-xs-9">' + txObj.representative.substring(0, 25) + ' ....</div>' +
+      '</div></li></ul>');
+  }
+
+  function emptyRecent() {
+    recentEmpty = true;
+    $('.recent').append('<div class="row"><div class="col-xs-12" style="color:#888">There is nothing to show here.</div></div>');
+  }
+
+  function refreshBalances() {
+    var balance = wallet.getWalletBalance();
+    var pending = wallet.getWalletPendingBalance();
+
+    $('#pending').html((pending.over("1000000000000000000000000").toJSNumber() / 1000000).toFixed(6));
+    $('#balance').html((balance.over("1000000000000000000000000").toJSNumber() / 1000000).toFixed(6));
+
+    var accs = wallet.getAccounts();
+    for (let i in accs) {
+      var acc = accs[i].account;
+      var bal = accs[i].balance;
+      var label = accs[i].label;
+      if (label == "")
+        $('select').find('.acc_select_' + acc).html(acc + ' (' + (bal.over("1000000000000000000000000").toJSNumber() / 1000000).toFixed(6) + ' XRB)');
+      else
+        $('select').find('.acc_select_' + acc).html('(' + label + ') - ' + acc + ' (' + (bal.over("1000000000000000000000000").toJSNumber() / 1000000).toFixed(6) + ' XRB)');
+    }
+  }
+
+  function sync() {
+    $.post('ajax.php', 'action=sync&data=' + wallet.pack(), function (data) {
+      data = JSON.parse(data);
+      if (data.status == 'redirect') {
+        window.location.href = data.location;
+      }
+    });
+  }
+
+  function recheckWork() {
+    var pool = wallet.getWorkPool();
+    var batch = [];
+
+    for (let i in pool) {
+      if (!pool[i].requested || pool[i].needed) {
+        batch.push(pool[i].hash);
+      }
+    }
+
+    if (batch.length > 0) {
+      if (batch.length > 1) {
+        $.post('ajax.php', 'action=batchWork&batch=' + JSON.stringify(batch), function (data) {
+          data = JSON.parse(data);
+          if (data.status == 'success') {
+            console.log('Work requested for blocks ', batch);
+            for (let i in data.workRes) {
+              var work = data.workRes[i].work;
+              var hash = data.workRes[i].hash;
+              if (data.work != false)
+                wallet.updateWorkPool(hash, work);
+              else
+                wallet.setWorkNeeded(hash);
+            }
+          }
+          else if (data.status == 'redirect') {
+            window.location.href = data.location;
+          }
+        });
+      }
+      else
+        remoteWork(batch[0]);
+    }
+    setTimeout(recheckWork, 5000);
+  }
+
+  function broadcastBlock(blk) {
+    var json = blk.getJSONBlock();
+    var obj = JSON.parse(json);
+    var hash = blk.getHash(true);
+    var guiHash;
+    if (blk.getType() == 'open' || blk.getType() == 'receive')
+      guiHash = blk.getSource();
+    else
+      guiHash = blk.getHash(true);
+
+    $.post('ajax.php', 'action=broadcast&hash=' + hash + "&data=" + json, function (data) {
+      data = JSON.parse(data);
+      if (data.status == 'success') {
+        wallet.removeReadyBlock(hash);
+        removeRecentFromGui(guiHash);
+        console.log('Block broadcasted to network: ' + hash);
+        alertInfo(blk.getType() + " block broadcasted to network.");
+        sync();
+        updateAccountGUI(blk.getAccount());
+      }
+      else if (data.status == 'redirect') {
+        window.location.href = data.location;
+      }
+      else {
+        console.warn('Error broadcasting block: ' + hash + ". Error: " + data.msg);
+      }
+    });
+  }
+
+  function rebroadcastBlock(blockHash) {
+    $.post('ajax.php', 'action=rebroadcast&hash=' + blockHash, function (data) {
+      data = JSON.parse(data);
+      if (data.status == 'success') {
+        alertInfo('Block rebroadcated');
+      }
+      else {
+        alertError(data.msg);
+      }
+    });
+  }
+
+  function updateAccountGUI(acc) {
+    refreshChain();
+
+    // update account balance on send and receive modals
+    var balance = wallet.getAccountBalance(acc).over("1000000000000000000000000").toJSNumber();
+    $('#sendbalance_' + acc).html(balance);
+    $('#receivebalance_' + acc).html(balance);
+  }
+
+  function refreshChain() {
+    txsOffset = 0;
+    bottomReached = false;
+    loadingTxs = false;
+
+    var selected = parseXRBAccount($('#acc-select').val());
+    var last = wallet.getLastNBlocks(selected, 20);
+    clearBlocksFromGui();
+
+    for (let i in last)
+      addBlockToGui(last[i]);
+    txsOffset = last.length;
+  }
+
+  function updateReceiveQr(account = null) {
+    var acc = account ? account : parseXRBAccount($('#receive-select').val());
+    var am = $('#receive-amount').val();
+    if (acc)
+      $('#qr .img').html('<img style="height: 200px; margin-left: auto; margin-right: auto;" src="https://chart.googleapis.com/chart?chs=200x200&cht=qr&chl=raiblocks:' + acc + '?amount=' + am + '">')
+    $('.qr-bot').html('<code>' + acc + '</code>');
+    $('#qr').addClass('well');
+  }
+
+  function getPendingBlocks() {
+    $.post('ajax.php', 'action=getPending&last=' + lastRetrieved, function (data) {
+      data = JSON.parse(data);
+      if (data.status == 'success') {
+        lastRetrieved = data.last > lastRetrieved ? data.last : lastRetrieved;
+        for (let i in data.data) {
+          var blk = data.data[i];
+          var acc = blk.block.destination;
+          var from = blk.from;
+          if (wallet.addPendingReceiveBlock(blk.hash, acc, from, blk.amount)) {
+            var txObj = { account: acc, amount: blk.amount, date: blk.time, hash: blk.hash }
+            addRecentRecToGui(txObj);
+          }
+        }
+        sync();
+        refreshBalances();
+      }
+      else if (data.status == 'redirect') {
+        window.location.href = data.location;
+      }
+      setTimeout(getPendingBlocks, 5000);
+    });
+  }
+
+  function getPendingBlocks2() {
+    var accs = wallet.getAccounts();
+    var accounts = [];
+    for (let i in accs)
+      accounts.push(accs[i].account);
+    $.post('ajax.php', 'action=getPending2&accounts=' + JSON.stringify(accounts), function (data) {
+      data = JSON.parse(data);
+      if (data.status == 'success') {
+        for (var account in data.res) {
+          for (let i in data.res[account].blocks) {
+            var blk = data.res[account].blocks[i];
+            if (wallet.addPendingReceiveBlock(blk.hash, account, blk.from, blk.amount)) {
+              var txObj = { account: account, amount: bigInt(blk.amount), date: blk.from, hash: blk.hash }
+              addRecentRecToGui(txObj);
+            }
+          }
+        }
+      }
+      else if (data.status == 'redirect') {
+        window.location.href = data.location;
+      }
+      setTimeout(getPendingBlocks2, 5000);
+    })
+  }
+
+  function remoteWork(hash) {
+    $.post('ajax.php', 'action=remoteWork&hash=' + hash, function (data) {
+      data = JSON.parse(data);
+      if (data.status == 'success') {
+        console.log('Work requested for block ' + hash);
+        if (data.work != false)
+          wallet.updateWorkPool(hash, data.work);
+        else
+          wallet.setWorkNeeded(hash);
+      }
+      else if (data.status == 'redirect') {
+        window.location.href = data.location;
+      }
+    });
+  }
+
+  function getSingleWork(hash, acc) {
+    if (waitingForSingleWork)
+      return;
+    waitingForSingleWork = true;
+
+    var request = function () {
+      if (waitingForSingleWork) {
+        $.post('ajax.php', 'action=getSingle&hash=' + hash, function (data) {
+          data = JSON.parse(data);
+          if (data.status == 'success') {
+            if (data.found == true) {
+              if (data.worked) {
+                wallet.updateWorkPool(hash, data.work);
+                waitingForSingleWork = false;
+              }
+              else
+                setTimeout(request, 3000);
+            }
+            else {
+              // not found? submit it
+              remoteWork(hash);
+            }
+          }
+          else if (data.status == 'redirect') {
+            window.location.href = data.location;
+          }
+          else
+            setTimeout(request, 3000);
+        });
+      }
+    }
+    request();
+  }
+
+  function cancelWait() {
+    waitingForSingleWork = false;
+  }
+
+  function checkReadyBlocks() {
+    var blk = wallet.getNextReadyBlock();
+    if (blk !== false)
+      broadcastBlock(blk);
+    setTimeout(checkReadyBlocks, 5000);
+  }
+
+  function checkChains(callback) {
+    var accs = wallet.getAccounts();
+    var lastHashes = {};
+    var forks = [];
+    var emptyAccounts = [];
+    for (let i in accs) {
+      let blk = wallet.getLastNBlocks(accs[i].account, 1);
+      if (blk.length == 0) {
+        emptyAccounts.push(accs[i].account);
+        continue;
+      }
+      lastHashes[accs[i].account] = blk[0].getHash(true);
+    }
+    lastHashes = JSON.stringify(lastHashes);
+    var emptyAccountsJSON = JSON.stringify(emptyAccounts);
+    $.post('ajax.php', 'action=checkChains&hashes=' + lastHashes + '&emptyAccounts=' + emptyAccountsJSON, function (data) {
+      data = JSON.parse(data);
+      if (data.status == 'success') {
+        if (data.unsynced.length > 0) {
+          for (let i in data.unsynced) {
+            var acc = data.unsynced[i].account;
+            if (!data.unsynced[i].forked) {
+              // not forked, but there are new blocks
+              for (let j in data.unsynced[i].blocks) {
+                if (j == 0 && emptyAccounts.indexOf(acc) == -1)
+                  continue; // first block is already confirmed, unless its missing too :P
+                var blk = new Block();
+                blk.buildFromJSON(data.unsynced[i].blocks[j].block, blk.getMaxVersion());
+                if (blk.getType() == 'receive' || blk.getType() == 'open')
+                  blk.setOrigin(data.unsynced[i].blocks[j].fromto);
+                blk.setImmutable(true);
+                try {
+                  wallet.importBlock(blk, acc);
+                  wallet.removeReadyBlock(blk.getHash(true)); // so it is not broadcasted, not necessary
+                } catch (e) {
+                  logger.error(e);
+                }
+              }
+            }
+            else {
+              // our chain is different than the one the network has
+              forks.push(acc);
+            }
+          }
+
+          if (forks.length > 0) {
+            resolveForks(forks, callback);
+            return; // transfer callback to resolveForks (async function)
+            // we dont want the wallet to be opened with an invalid chain
+          }
+        }
+      }
+      else if (data.status == 'redirect') {
+        window.location.href = data.location;
+      }
+      else
+        logger.warn('Unable check if chain is synced with network.');
+      callback();
+    });
+  }
+
+  /*
+   * Basically posts local chain block hashes until server (node) returns a common one
+   */
+  function resolveForks(forks, callbackFunction) {
+    var evaluating = 0;
+    var resolve = function (acc, offset) {
+      logger.log('Resolving fork for account: ' + acc);
+
+      var blocks = wallet.getLastNBlocks(acc, RESOLVE_FORKS_BLOCK_BATCH_SIZE, offset);
+      var payload = [];
+      for (let i in blocks)
+        payload.push(blocks[i].getHash(true));
+
+      $.post('ajax.php', 'action=accountContains&blocks=' + JSON.stringify(payload), function (data) {
+        data = JSON.parse(data);
+        if (data.status == 'success') {
+          if (data.forked) {
+            if (data.successors.length == 1) {
+              // this happens when a block is at the wallet but not at the ledger
+              // rebroadcast the rest of the blocks
+              var toRebroadcast = wallet.getBlocksUpTo(acc, data.successors[0].hash);
+              for (let i = 0; i < toRebroadcast.length; i++)
+                broadcastBlock(toRebroadcast[i]);
+
+              // jump to next account or callback function
+              if (evaluating >= forks.length - 1)
+                callbackFunction();
+              else {
+                evaluating++;
+                resolve(forks[evaluating], 0);
+              }
+            }
+            else {
+              var blk = new Block();
+              blk.buildFromJSON(data.successors[1].block, blk.getMaxVersion());
+              try {
+                if (wallet.importForkedBlock(blk, acc)) {
+                  for (let i = 2; i < data.successors.length - 1; i++) {
+                    var blk = new Block();
+                    blk.buildFromJSON(data.successors[i].block, blk.getMaxVersion());
+                    wallet.importBlock(blk, acc);
+                  }
+                }
+                else
+                  logger.warn('Trying to fix a fork not found :P');
+
+                // jump to next account or callback function
+                if (evaluating >= forks.length - 1)
+                  callbackFunction();
+                else {
+                  evaluating++;
+                  resolve(forks[evaluating], 0);
+                }
+
+              } catch (e) {
+                logger.error(e);
+              }
+            }
+          }
+          else {
+            // look for the fork deeper
+            if (wallet.getAccountBlockCount(acc) > offset)
+              resolve(acc, offset + RESOLVE_FORKS_BLOCK_BATCH_SIZE);
+            else {
+              logger.warn('Reached chain root without finding the fork searched: ' + acc);
+
+              // jump to next account or callback function
+              if (evaluating >= forks.length - 1)
+                callbackFunction();
+              else {
+                evaluating++;
+                resolve(forks[evaluating], 0);
+              }
+            }
+          }
+        }
+        else if (data.status == 'redirect') {
+          window.location.href = data.location;
+        }
+        else {
+          // try again ...
+          setTimeout(function () {
+            resolve(acc, offset);
+          }, 500)
+        }
+      });
+    }
+
+    resolve(forks[evaluating], 0);
+  }
+
+  function debugAllWallet() {
+    wallet.debug();
+    setTimeout(debugAllWallet, 3000);
+  }
+
+  function goToWallet() {
+    // stop live txs script
+    txs.stop();
+
+    // load wallet template
+    $('.landing').html('<div class="transition-overlay"><span>RAIWALLET</span><br/><i class="fa fa-circle-o-notch fa-spin fa-fw"></i></div>');
+    $(".modal").modal('hide');
+
+    // load elements and display wallet
+    var accounts = wallet.getAccounts();
+    var total_balance = 0;
+    for (let i in accounts) {
+      addAccountToGUI(accounts[i]);
+    }
+    $('#minimum_receive').val(wallet.getMinimumReceive().over("1000000000000000000000000"));
+
+    checkChains(function () {
+      refreshBalances();
+      getPendingBlocks2();
+      recheckWork();
+      checkReadyBlocks();
+
+      var selected = wallet.getAccounts()[0].account;
+      var last = wallet.getLastNBlocks(selected, 20);
+      clearBlocksFromGui();
+
+      for (let i in last)
+        addBlockToGui(last[i]);
+      txsOffset = last.length;
+
+      lastAction = Date.now() / 1000;
+      autoSignOut();
+      $('button, li, input').click(function () {
+        lastAction = Date.now() / 1000;
+      });
+
+      window.history.pushState("home", "RaiWallet - Home", "/home");
+      document.title = 'RaiWallet - Home';
+
+      setTimeout(function () {
+        $('.landing').fadeOut(500, function () {
+          $('.landing').remove();
+          $('.wallet-wrapper').fadeIn();
+        });
+      }, 1000);
+    });
+
+  }
+
+  $('.form-register').submit(function () {
+    // check pass
+    if ($('#psw').val() == $('#psw2').val()) {
+      if ($('#psw').val().length < 8) {
+        alertError("You are going to store money, choose a stronger password :P");
+        return false;
+      }
+
+      // create wallet and send to server
+      wallet = new Wallet($('#psw').val());
+      wallet.setLogger(logger);
+      var seed = wallet.createWallet();
+      var pack = wallet.pack();
+      var email = $('#email').val();
+      $('input').prop('disabled', true);
+      $.post('ajax.php', 'action=register&email=' + email + '&wallet=' + pack, function (data) {
+        data = JSON.parse(data);
+
+        if (data.status == 'success') {
+          alertInfo('Wallet successfully registered.');
+          $('#wallet_id_reg').html(data.identifier);
+          $('#wallet_seed_reg').html(seed);
+          $('.registering').fadeOut(500, function () {
+            $('.registered').fadeIn(500);
+          });
+          registered = true;
+        }
+        else {
+          alertError(data.msg);
+        }
+        $('input').prop('disabled', false);
+      });
+    }
+    else
+      alertError('Passwords do not match.');
+
+    return false;
+
+  });
+
+  $('.form-login').submit(function (e) {
+    e.preventDefault();
+    var wid = $('#wid').val();
+
+    $('input').prop('disabled', true);
+    $.post('ajax.php', 'action=login&wallet_id=' + wid, function (data) {
+      data = JSON.parse(data);
+
+      if (data.status == 'success') {
+        // decrypt wallet and check checksum
+        wallet = new Wallet($('#password').val());
+        wallet.setLogger(logger);
+        $('#password').val('');
+
+        try {
+          wallet.load(data.wallet);
+        } catch (e) {
+          alertError('Error decrypting wallet. Check that the password is correct.');
+          $('input').prop('disabled', 0);
+          console.log(e);
+          return;
+        }
+
+        if (data.alias) {
+          $('#alias').val(data.alias);
+          $('#alias').prop('disabled', 1);
+          $('#change_alias').fadeOut();
+        }
+
+        signOutInterval = data.sign_out;
+        $('#aso_time').val(signOutInterval);
+        goToWallet();
+      }
+      else {
+        alertError(data.msg);
+      }
+      $('input').prop('disabled', 0);
+    });
+    return false;
+  });
+
+  $('.gotowallet').click(goToWallet);
+
+  $('.form-send').submit(function (event) {
+    event.preventDefault();
+    // reset field errors
+    $('#to').css('border-color', '#ccc');
+    $('#samount').css('border-color', '#ccc');
+    var error = false;
+
+    // from
+    var from = parseXRBAccount($('#send-select').val());
+    if (from === false)
+      return alertError('Invalid origin address');
+
+    // check address
+    var to = $('#to').val();
+    try {
+      keyFromAccount(to);
+    } catch (e) {
+      alertError('Invalid XRB address.');
+      $('#to').css('border-color', '#880000');
+      error = true;
+    }
+
+    var balance = wallet.getAccountBalance(from);
+
+    var amount = parseFloat($('#samount').val());
+    var amountRai = parseInt(amount * 1000000);
+    var amountRaw = bigInt(amountRai).multiply("1000000000000000000000000");
+    if (amount <= 0) {
+      alertError('Invalid amount.');
+      $('#samount').css('border-color', '#880000');
+      error = true;
+    }
+
+    if (amountRaw.greater(balance)) {
+      alertError('Amount is greater than balance in the selected account.');
+      $('#samount').css('border-color', '#880000');
+      error = true;
+    }
+
+    if (!error) {
+      try {
+        var blk = wallet.addPendingSendBlock(from, to, amountRaw);
+        var hash = blk.getHash(true);
+
+        refreshBalances();
+        $(".modal").modal('hide');
+        alertInfo("Transaction built successfully. Waiting for work ...");
+        addRecentSendToGui({ date: "Just now", amount: amountRaw, hash: hash });
+        remoteWork(blk.getPrevious());
+      } catch (e) {
+        alertError('Ooops, something happened: ' + e.message);
+      }
+
+    }
+    return false;
+  });
+
+  $('#generate_acc').click(function () {
+    var newAccount = wallet.newKeyFromSeed();
+    addAccountToGUI({ account: newAccount, balance: 0 });
+    checkChains(function () {
+      refreshBalances();
+      sync();
+      alertSuccess('New account added to wallet.');
+      wallet.useAccount(newAccount);
+      updateReceiveQr(newAccount);
+    });
+  });
+
+  $('#change_repr').click(function () {
+    var selected = parseXRBAccount($('#change-select').val());
+    var repr = $('#acc-repr').val();
+
+    try {
+      keyFromAccount(repr);
+    } catch (e) {
+      alertError("Invalid representative account.");
+      return;
+    }
+
+    try {
+      var blk = wallet.addPendingChangeBlock(selected, repr);
+      sync();
+      var txObj = { representative: repr, hash: blk.getHash(true) };
+      addRecentChangeToGui(txObj);
+      alertInfo("Representative changed. Waiting for work to broadcast the block.");
+    } catch (e) {
+      console.log(e);
+      alertError('Something happened: ' + e);
+    }
+  });
+
+  $('#receive-select').change(function () {
+    updateReceiveQr();
+  });
+
+  $('#receive-amount').keyup(function () {
+    updateReceiveQr();
+  });
+
+  $('#change-select').change(function () {
+    var selected = parseXRBAccount($('#change-select').val());
+    var repr = wallet.getRepresentative(selected);
+    $('#acc-repr').val(repr);
+  });
+
+
+  $('#acc-select').change(function () {
+    refreshChain();
+  });
+
+  $('#refresh').click(function () {
+    wallet.recalculateWalletBalances();
+  });
+
+
+  function addBlockToGui(block, prepend = false) {
+    if (prepend)
+      var func = 'prepend';
+    else
+      var func = 'append';
+
+    if (block.getType() != 'change') {
+      if (block.getType() == 'send') {
+        var color = 'red';
+        var fromto = 'To: ';
+        var symbol = '-';
+        var account = block.getDestination();
+      }
+      else {
+        var color = 'green';
+        var fromto = 'From: ';
+        var symbol = '+';
+        var account = block.getOrigin();
+      }
+      var type = block.getType();
+
+      $('.txs ul')[func](
+        '<li id="tx_' + block.getHash(true) + '">' +
+        '<div class="row">' +
+        '<div class="col-sm-2">' +
+        '<span class="blk-type ' + type + '">' + block.getType() + '</span><br/>' +
+        '<span class="' + color + ' blk-amount">' + symbol + '' + (block.getAmount().over("1000000000000000000000000").toJSNumber() / 1000000).toFixed(6) + '</span>' +
+        '</div>' +
+        '<div class="col-sm-6">' +
+        '<a href="https://raiblocks.net/block/index.php?h=' + block.getHash(true) + '" target="_blank"><span class="blk-hash"> ' + block.getHash(true) + '</span></a><br/>' +
+        '<b>' + fromto + '</b><span class="blk-account">' + account + '</span>' +
+        '</div>' +
+        '<div class="col-sm-4 text-center">' +
+        '<button type="button" data-toggle="tooltip" data-placement="left" title="View Block" class="btn btn-default gborder" style="margin-right:5px" onclick="$(\'.txs ul\').find(\'#json_' + block.getHash(true) + '\').fadeToggle();"><i class="fa fa-angle-down" aria-hidden="true"></i></button>' +
+        '<button type="button" data-toggle="tooltip" data-placement="right" title="Rebroadcast" class="btn btn-default gborder rebroadcast" id="rebroadcast_' + block.getHash(true) + '" ><i class="fa fa-paper-plane-o" aria-hidden="true"></i></button>' +
+        '</div>' +
+        '<div class="col-sm-12" style="display:none; margin-top:15px" id="json_' + block.getHash(true) + '">' +
+        '<pre><code>' + block.getJSONBlock(true) + '</code></pre>' +
+        '</div>' +
+        '</div>' +
+        '</li>'
+      );
+    }
+    else {
+      var type = "change";
+      $('.txs ul')[func](
+        '<li id="tx_' + block.getHash(true) + '">' +
+        '<div class="row">' +
+        '<div class="col-sm-2">' +
+        '<span class="blk-type ' + type + '">' + block.getType() + '</span>' +
+        '</div>' +
+        '<div class="col-sm-6">' +
+        '<a href="https://raiblocks.net/block/index.php?h=' + block.getHash(true) + '" target="_blank"><span class="blk-hash"> ' + block.getHash(true) + '</span></a><br/>' +
+        '<span class="blk-account">' + block.getRepresentative() + '</span>' +
+        '</div>' +
+        '<div class="col-sm-4 text-center">' +
+        '<button type="button" data-toggle="tooltip" data-placement="left" title="View Block" class="btn btn-default gborder" style="margin-right:5px" onclick="$(\'.txs ul\').find(\'#json_' + block.getHash(true) + '\').fadeToggle();"><i class="fa fa-angle-down" aria-hidden="true"></i></button>' +
+        '<button type="button" data-toggle="tooltip" data-placement="right" title="Rebroadcast" class="btn btn-default gborder rebroadcast" id="rebroadcast_' + block.getHash(true) + '" ><i class="fa fa-paper-plane-o" aria-hidden="true"></i></button>' +
+        '</div>' +
+        '<div class="col-sm-12" style="display:none; margin-top:15px" id="json_' + block.getHash(true) + '">' +
+        '<pre><code>' + block.getJSONBlock(true) + '</code></pre>' +
+        '</div>' +
+        '</div>' +
+        '</li>'
+      );
+    }
+    $('[data-toggle="tooltip"]').tooltip();
+  }
+
+
+  $('.txs ul').on('click', '.rebroadcast', function () {
+    var hash = $(this).attr('id').replace('rebroadcast_', '');
+    rebroadcastBlock(hash);
+  });
+
+  $('.form-minimum').submit(function (event) {
+    event.preventDefault();
+    var minimum = parseInt($('#minimum_receive').val());
+    if (minimum < 0) {
+      alertError('Invalid minimum amount');
+      return;
+    }
+
+    if (wallet.setMinimumReceive(bigInt(minimum).multiply("1000000000000000000000000"))) {
+      sync();
+      alertInfo('Settings updated');
+    }
+    else {
+      $('#minimum_receive').val(wallet.getMinimumReceive().over("1000000000000000000000000"));
+      alertError('Error updating setting. Make sure you entered a valid number in rai units.');
+    }
+  });
+
+  $('.form-alias').submit(function (event) {
+    event.preventDefault();
+    var serialize = $(this).serialize();
+
+    $.post('ajax.php', 'action=changeAlias&' + serialize, function (data) {
+      data = JSON.parse(data);
+      if (data.status == 'success') {
+        alertSuccess(data.msg);
+        $('#alias').prop('disabled', true);
+        $('#change_alias').fadeOut();
+      }
+      else
+        alertError(data.msg);
+    });
+    return false;
+  });
+
+  $('.form-autologout').submit(function (event) {
+    event.preventDefault();
+    var serialize = $(this).serialize();
+    $.post('ajax.php', 'action=autologout&' + serialize, function (data) {
+      data = JSON.parse(data);
+      if (data.status == 'success') {
+        alertSuccess(data.msg);
+        signOutInterval = $('#aso_time').val();
+      }
+      else
+        alertError(data.msg);
+    });
+    return false;
+  });
+
+  $('.form-recovery').submit(function (event) {
+    event.preventDefault();
+    var serialize = $(this).serialize();
+    $.post('ajax.php', 'action=recover_id&' + serialize, function (data) {
+      data = JSON.parse(data);
+      if (data.status == 'success') {
+        alertSuccess(data.msg);
+      }
+      else
+        alertError(data.msg);
+    });
+    return false;
+  });
+
+  $('.form-import').submit(function (event) {
+    event.preventDefault();
+    let s = $('#i_seed').val();
+    let p1 = $('#import_psw1').val();
+    let p2 = $('#import_psw2').val();
+
+    if (p1 == p2) {
+      if (/^[0-9A-Fa-f]{64}$/.test(s)) {
+        // create wallet and send to server
+        wallet = new Wallet(p1);
+        wallet.setLogger(logger);
+        var seed = wallet.createWallet(s);
+        var pack = wallet.pack();
+        var email = $('#email-import').val();
+
+        $('input').prop('disabled', true);
+        $.post('ajax.php', 'action=register&email=' + email + '&wallet=' + pack, function (data) {
+          data = JSON.parse(data);
+
+          if (data.status == 'success') {
+            alertInfo('Wallet successfully registered.');
+            $('#wallet_id_import').html(data.identifier);
+            $('#wallet_seed_import').html(seed);
+            $('.importing').fadeOut(500, function () {
+              $('.imported').fadeIn(500);
+            });
+            registered = true;
+          }
+          else {
+            alertError(data.msg);
+          }
+          $('input').prop('disabled', false);
+        });
+
+      } else {
+        alertError('Invalid walled seed. It should be a hex encoded 32 byte string.');
+      }
+    } else {
+      alertError('Passwords do not match');
+    }
+
+    return false;
+  });
+
+  $('#seed_button').click(function () {
+    try {
+      $('#seed_backup').val(wallet.getSeed($('#seed_pass').val()));
+      $('#seed_pass').val('');
+      setTimeout(function () {
+        $('#seed_backup').val($('#seed_backup').attr('value'));
+      }, 30000);
+      alertInfo('Seed will be visible for 30 seconds.');
+    } catch (e) {
+      alertError('Incorrect password');
+    }
+  });
+
+  $('#change-pass').click(function () {
+    var old = $('#change-pass-current').val();
+    var new1 = $('#change-pass-new1').val();
+    var new2 = $('#change-pass-new2').val();
+
+    if (new1 != new2) {
+      alertError('Passwords do not match.');
+      return;
+    }
+
+    if (new1.length < 8) {
+      alertWarning("Use a safer password OMG");
+      return;
+    }
+
+    try {
+      wallet.changePass(old, new1);
+      sync();
+      alertSuccess('Password successfully changed.');
+      old = $('#change-pass-current').val('');
+      new1 = $('#change-pass-new1').val('');
+      new2 = $('#change-pass-new2').val('');
+    } catch (e) {
+      alertError(e);
+    }
+
+  });
+
+  $('#change-iterations').click(function () {
+    var newIterations = parseInt($('#iteration_number').val());
+    var oldIterations = wallet.getIterations();
+    if (newIterations < 500) {
+      alertWarning("A greater iteration number is recommended.");
+    }
+
+    try {
+      wallet.setIterations(newIterations);
+      $('#iteration_number').val('');
+      alertInfo("PBKDF2 iterations updated.");
+    } catch (e) {
+      alertError(e);
+    }
+  });
+
+  $('#download_wallet').click(function () {
+    var data = wallet.pack();
+    var link = document.createElement('a');
+    link.download = 'RaiWalletBackUp.dat';
+    var blob = new Blob([data], { type: 'text/plain' });
+    link.href = window.URL.createObjectURL(blob);
+    link.click();
+  });
+
+  function clearBlocksFromGui() {
+    $('.txs ul').html('');
+  }
+
+  function autoSignOut() {
+    if (Date.now() / 1000 - lastAction > 60 * signOutInterval)
+      window.location.href = '/out';
+    setTimeout(autoSignOut, 30000);
+  }
+
 });
-},{"../Block.js":1,"../Wallet":2}],4:[function(require,module,exports){
+},{"rai-wallet":135}],2:[function(require,module,exports){
 var asn1 = exports;
 
 asn1.bignum = require('bn.js');
@@ -3343,7 +1171,7 @@ asn1.constants = require('./asn1/constants');
 asn1.decoders = require('./asn1/decoders');
 asn1.encoders = require('./asn1/encoders');
 
-},{"./asn1/api":5,"./asn1/base":7,"./asn1/constants":11,"./asn1/decoders":13,"./asn1/encoders":16,"bn.js":20}],5:[function(require,module,exports){
+},{"./asn1/api":3,"./asn1/base":5,"./asn1/constants":9,"./asn1/decoders":11,"./asn1/encoders":14,"bn.js":22}],3:[function(require,module,exports){
 var asn1 = require('../asn1');
 var inherits = require('inherits');
 
@@ -3406,7 +1234,7 @@ Entity.prototype.encode = function encode(data, enc, /* internal */ reporter) {
   return this._getEncoder(enc).encode(data, reporter);
 };
 
-},{"../asn1":4,"inherits":105,"vm":162}],6:[function(require,module,exports){
+},{"../asn1":2,"inherits":107,"vm":167}],4:[function(require,module,exports){
 var inherits = require('inherits');
 var Reporter = require('../base').Reporter;
 var Buffer = require('buffer').Buffer;
@@ -3524,7 +1352,7 @@ EncoderBuffer.prototype.join = function join(out, offset) {
   return out;
 };
 
-},{"../base":7,"buffer":51,"inherits":105}],7:[function(require,module,exports){
+},{"../base":5,"buffer":53,"inherits":107}],5:[function(require,module,exports){
 var base = exports;
 
 base.Reporter = require('./reporter').Reporter;
@@ -3532,7 +1360,7 @@ base.DecoderBuffer = require('./buffer').DecoderBuffer;
 base.EncoderBuffer = require('./buffer').EncoderBuffer;
 base.Node = require('./node');
 
-},{"./buffer":6,"./node":8,"./reporter":9}],8:[function(require,module,exports){
+},{"./buffer":4,"./node":6,"./reporter":7}],6:[function(require,module,exports){
 var Reporter = require('../base').Reporter;
 var EncoderBuffer = require('../base').EncoderBuffer;
 var DecoderBuffer = require('../base').DecoderBuffer;
@@ -4168,7 +1996,7 @@ Node.prototype._isPrintstr = function isPrintstr(str) {
   return /^[A-Za-z0-9 '\(\)\+,\-\.\/:=\?]*$/.test(str);
 };
 
-},{"../base":7,"minimalistic-assert":111}],9:[function(require,module,exports){
+},{"../base":5,"minimalistic-assert":113}],7:[function(require,module,exports){
 var inherits = require('inherits');
 
 function Reporter(options) {
@@ -4291,7 +2119,7 @@ ReporterError.prototype.rethrow = function rethrow(msg) {
   return this;
 };
 
-},{"inherits":105}],10:[function(require,module,exports){
+},{"inherits":107}],8:[function(require,module,exports){
 var constants = require('../constants');
 
 exports.tagClass = {
@@ -4335,7 +2163,7 @@ exports.tag = {
 };
 exports.tagByName = constants._reverse(exports.tag);
 
-},{"../constants":11}],11:[function(require,module,exports){
+},{"../constants":9}],9:[function(require,module,exports){
 var constants = exports;
 
 // Helper
@@ -4356,7 +2184,7 @@ constants._reverse = function reverse(map) {
 
 constants.der = require('./der');
 
-},{"./der":10}],12:[function(require,module,exports){
+},{"./der":8}],10:[function(require,module,exports){
 var inherits = require('inherits');
 
 var asn1 = require('../../asn1');
@@ -4682,13 +2510,13 @@ function derDecodeLen(buf, primitive, fail) {
   return len;
 }
 
-},{"../../asn1":4,"inherits":105}],13:[function(require,module,exports){
+},{"../../asn1":2,"inherits":107}],11:[function(require,module,exports){
 var decoders = exports;
 
 decoders.der = require('./der');
 decoders.pem = require('./pem');
 
-},{"./der":12,"./pem":14}],14:[function(require,module,exports){
+},{"./der":10,"./pem":12}],12:[function(require,module,exports){
 var inherits = require('inherits');
 var Buffer = require('buffer').Buffer;
 
@@ -4739,7 +2567,7 @@ PEMDecoder.prototype.decode = function decode(data, options) {
   return DERDecoder.prototype.decode.call(this, input, options);
 };
 
-},{"./der":12,"buffer":51,"inherits":105}],15:[function(require,module,exports){
+},{"./der":10,"buffer":53,"inherits":107}],13:[function(require,module,exports){
 var inherits = require('inherits');
 var Buffer = require('buffer').Buffer;
 
@@ -5036,13 +2864,13 @@ function encodeTag(tag, primitive, cls, reporter) {
   return res;
 }
 
-},{"../../asn1":4,"buffer":51,"inherits":105}],16:[function(require,module,exports){
+},{"../../asn1":2,"buffer":53,"inherits":107}],14:[function(require,module,exports){
 var encoders = exports;
 
 encoders.der = require('./der');
 encoders.pem = require('./pem');
 
-},{"./der":15,"./pem":17}],17:[function(require,module,exports){
+},{"./der":13,"./pem":15}],15:[function(require,module,exports){
 var inherits = require('inherits');
 
 var DEREncoder = require('./der');
@@ -5065,7 +2893,7 @@ PEMEncoder.prototype.encode = function encode(data, options) {
   return out.join('\n');
 };
 
-},{"./der":15,"inherits":105}],18:[function(require,module,exports){
+},{"./der":13,"inherits":107}],16:[function(require,module,exports){
 (function (global){
 'use strict';
 
@@ -5559,7 +3387,7 @@ var objectKeys = Object.keys || function (obj) {
 };
 
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"util/":161}],19:[function(require,module,exports){
+},{"util/":166}],17:[function(require,module,exports){
 'use strict'
 
 exports.byteLength = byteLength
@@ -5675,7 +3503,576 @@ function fromByteArray (uint8) {
   return parts.join('')
 }
 
-},{}],20:[function(require,module,exports){
+},{}],18:[function(require,module,exports){
+// Blake2B in pure Javascript
+// Adapted from the reference implementation in RFC7693
+// Ported to Javascript by DC - https://github.com/dcposch
+
+var util = require('./util')
+
+// 64-bit unsigned addition
+// Sets v[a,a+1] += v[b,b+1]
+// v should be a Uint32Array
+function ADD64AA (v, a, b) {
+  var o0 = v[a] + v[b]
+  var o1 = v[a + 1] + v[b + 1]
+  if (o0 >= 0x100000000) {
+    o1++
+  }
+  v[a] = o0
+  v[a + 1] = o1
+}
+
+// 64-bit unsigned addition
+// Sets v[a,a+1] += b
+// b0 is the low 32 bits of b, b1 represents the high 32 bits
+function ADD64AC (v, a, b0, b1) {
+  var o0 = v[a] + b0
+  if (b0 < 0) {
+    o0 += 0x100000000
+  }
+  var o1 = v[a + 1] + b1
+  if (o0 >= 0x100000000) {
+    o1++
+  }
+  v[a] = o0
+  v[a + 1] = o1
+}
+
+// Little-endian byte access
+function B2B_GET32 (arr, i) {
+  return (arr[i] ^
+  (arr[i + 1] << 8) ^
+  (arr[i + 2] << 16) ^
+  (arr[i + 3] << 24))
+}
+
+// G Mixing function
+// The ROTRs are inlined for speed
+function B2B_G (a, b, c, d, ix, iy) {
+  var x0 = m[ix]
+  var x1 = m[ix + 1]
+  var y0 = m[iy]
+  var y1 = m[iy + 1]
+
+  ADD64AA(v, a, b) // v[a,a+1] += v[b,b+1] ... in JS we must store a uint64 as two uint32s
+  ADD64AC(v, a, x0, x1) // v[a, a+1] += x ... x0 is the low 32 bits of x, x1 is the high 32 bits
+
+  // v[d,d+1] = (v[d,d+1] xor v[a,a+1]) rotated to the right by 32 bits
+  var xor0 = v[d] ^ v[a]
+  var xor1 = v[d + 1] ^ v[a + 1]
+  v[d] = xor1
+  v[d + 1] = xor0
+
+  ADD64AA(v, c, d)
+
+  // v[b,b+1] = (v[b,b+1] xor v[c,c+1]) rotated right by 24 bits
+  xor0 = v[b] ^ v[c]
+  xor1 = v[b + 1] ^ v[c + 1]
+  v[b] = (xor0 >>> 24) ^ (xor1 << 8)
+  v[b + 1] = (xor1 >>> 24) ^ (xor0 << 8)
+
+  ADD64AA(v, a, b)
+  ADD64AC(v, a, y0, y1)
+
+  // v[d,d+1] = (v[d,d+1] xor v[a,a+1]) rotated right by 16 bits
+  xor0 = v[d] ^ v[a]
+  xor1 = v[d + 1] ^ v[a + 1]
+  v[d] = (xor0 >>> 16) ^ (xor1 << 16)
+  v[d + 1] = (xor1 >>> 16) ^ (xor0 << 16)
+
+  ADD64AA(v, c, d)
+
+  // v[b,b+1] = (v[b,b+1] xor v[c,c+1]) rotated right by 63 bits
+  xor0 = v[b] ^ v[c]
+  xor1 = v[b + 1] ^ v[c + 1]
+  v[b] = (xor1 >>> 31) ^ (xor0 << 1)
+  v[b + 1] = (xor0 >>> 31) ^ (xor1 << 1)
+}
+
+// Initialization Vector
+var BLAKE2B_IV32 = new Uint32Array([
+  0xF3BCC908, 0x6A09E667, 0x84CAA73B, 0xBB67AE85,
+  0xFE94F82B, 0x3C6EF372, 0x5F1D36F1, 0xA54FF53A,
+  0xADE682D1, 0x510E527F, 0x2B3E6C1F, 0x9B05688C,
+  0xFB41BD6B, 0x1F83D9AB, 0x137E2179, 0x5BE0CD19
+])
+
+var SIGMA8 = [
+  0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+  14, 10, 4, 8, 9, 15, 13, 6, 1, 12, 0, 2, 11, 7, 5, 3,
+  11, 8, 12, 0, 5, 2, 15, 13, 10, 14, 3, 6, 7, 1, 9, 4,
+  7, 9, 3, 1, 13, 12, 11, 14, 2, 6, 5, 10, 4, 0, 15, 8,
+  9, 0, 5, 7, 2, 4, 10, 15, 14, 1, 11, 12, 6, 8, 3, 13,
+  2, 12, 6, 10, 0, 11, 8, 3, 4, 13, 7, 5, 15, 14, 1, 9,
+  12, 5, 1, 15, 14, 13, 4, 10, 0, 7, 6, 3, 9, 2, 8, 11,
+  13, 11, 7, 14, 12, 1, 3, 9, 5, 0, 15, 4, 8, 6, 2, 10,
+  6, 15, 14, 9, 11, 3, 0, 8, 12, 2, 13, 7, 1, 4, 10, 5,
+  10, 2, 8, 4, 7, 6, 1, 5, 15, 11, 9, 14, 3, 12, 13, 0,
+  0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+  14, 10, 4, 8, 9, 15, 13, 6, 1, 12, 0, 2, 11, 7, 5, 3
+]
+
+// These are offsets into a uint64 buffer.
+// Multiply them all by 2 to make them offsets into a uint32 buffer,
+// because this is Javascript and we don't have uint64s
+var SIGMA82 = new Uint8Array(SIGMA8.map(function (x) { return x * 2 }))
+
+// Compression function. 'last' flag indicates last block.
+// Note we're representing 16 uint64s as 32 uint32s
+var v = new Uint32Array(32)
+var m = new Uint32Array(32)
+function blake2bCompress (ctx, last) {
+  var i = 0
+
+  // init work variables
+  for (i = 0; i < 16; i++) {
+    v[i] = ctx.h[i]
+    v[i + 16] = BLAKE2B_IV32[i]
+  }
+
+  // low 64 bits of offset
+  v[24] = v[24] ^ ctx.t
+  v[25] = v[25] ^ (ctx.t / 0x100000000)
+  // high 64 bits not supported, offset may not be higher than 2**53-1
+
+  // last block flag set ?
+  if (last) {
+    v[28] = ~v[28]
+    v[29] = ~v[29]
+  }
+
+  // get little-endian words
+  for (i = 0; i < 32; i++) {
+    m[i] = B2B_GET32(ctx.b, 4 * i)
+  }
+
+  // twelve rounds of mixing
+  // uncomment the DebugPrint calls to log the computation
+  // and match the RFC sample documentation
+  // util.debugPrint('          m[16]', m, 64)
+  for (i = 0; i < 12; i++) {
+    // util.debugPrint('   (i=' + (i < 10 ? ' ' : '') + i + ') v[16]', v, 64)
+    B2B_G(0, 8, 16, 24, SIGMA82[i * 16 + 0], SIGMA82[i * 16 + 1])
+    B2B_G(2, 10, 18, 26, SIGMA82[i * 16 + 2], SIGMA82[i * 16 + 3])
+    B2B_G(4, 12, 20, 28, SIGMA82[i * 16 + 4], SIGMA82[i * 16 + 5])
+    B2B_G(6, 14, 22, 30, SIGMA82[i * 16 + 6], SIGMA82[i * 16 + 7])
+    B2B_G(0, 10, 20, 30, SIGMA82[i * 16 + 8], SIGMA82[i * 16 + 9])
+    B2B_G(2, 12, 22, 24, SIGMA82[i * 16 + 10], SIGMA82[i * 16 + 11])
+    B2B_G(4, 14, 16, 26, SIGMA82[i * 16 + 12], SIGMA82[i * 16 + 13])
+    B2B_G(6, 8, 18, 28, SIGMA82[i * 16 + 14], SIGMA82[i * 16 + 15])
+  }
+  // util.debugPrint('   (i=12) v[16]', v, 64)
+
+  for (i = 0; i < 16; i++) {
+    ctx.h[i] = ctx.h[i] ^ v[i] ^ v[i + 16]
+  }
+  // util.debugPrint('h[8]', ctx.h, 64)
+}
+
+// Creates a BLAKE2b hashing context
+// Requires an output length between 1 and 64 bytes
+// Takes an optional Uint8Array key
+function blake2bInit (outlen, key) {
+  if (outlen === 0 || outlen > 64) {
+    throw new Error('Illegal output length, expected 0 < length <= 64')
+  }
+  if (key && key.length > 64) {
+    throw new Error('Illegal key, expected Uint8Array with 0 < length <= 64')
+  }
+
+  // state, 'param block'
+  var ctx = {
+    b: new Uint8Array(128),
+    h: new Uint32Array(16),
+    t: 0, // input count
+    c: 0, // pointer within buffer
+    outlen: outlen // output length in bytes
+  }
+
+  // initialize hash state
+  for (var i = 0; i < 16; i++) {
+    ctx.h[i] = BLAKE2B_IV32[i]
+  }
+  var keylen = key ? key.length : 0
+  ctx.h[0] ^= 0x01010000 ^ (keylen << 8) ^ outlen
+
+  // key the hash, if applicable
+  if (key) {
+    blake2bUpdate(ctx, key)
+    // at the end
+    ctx.c = 128
+  }
+
+  return ctx
+}
+
+// Updates a BLAKE2b streaming hash
+// Requires hash context and Uint8Array (byte array)
+function blake2bUpdate (ctx, input) {
+  for (var i = 0; i < input.length; i++) {
+    if (ctx.c === 128) { // buffer full ?
+      ctx.t += ctx.c // add counters
+      blake2bCompress(ctx, false) // compress (not last)
+      ctx.c = 0 // counter to zero
+    }
+    ctx.b[ctx.c++] = input[i]
+  }
+}
+
+// Completes a BLAKE2b streaming hash
+// Returns a Uint8Array containing the message digest
+function blake2bFinal (ctx) {
+  ctx.t += ctx.c // mark last block offset
+
+  while (ctx.c < 128) { // fill up with zeros
+    ctx.b[ctx.c++] = 0
+  }
+  blake2bCompress(ctx, true) // final block flag = 1
+
+  // little endian convert and store
+  var out = new Uint8Array(ctx.outlen)
+  for (var i = 0; i < ctx.outlen; i++) {
+    out[i] = ctx.h[i >> 2] >> (8 * (i & 3))
+  }
+  return out
+}
+
+// Computes the BLAKE2B hash of a string or byte array, and returns a Uint8Array
+//
+// Returns a n-byte Uint8Array
+//
+// Parameters:
+// - input - the input bytes, as a string, Buffer or Uint8Array
+// - key - optional key Uint8Array, up to 64 bytes
+// - outlen - optional output length in bytes, default 64
+function blake2b (input, key, outlen) {
+  // preprocess inputs
+  outlen = outlen || 64
+  input = util.normalizeInput(input)
+
+  // do the math
+  var ctx = blake2bInit(outlen, key)
+  blake2bUpdate(ctx, input)
+  return blake2bFinal(ctx)
+}
+
+// Computes the BLAKE2B hash of a string or byte array
+//
+// Returns an n-byte hash in hex, all lowercase
+//
+// Parameters:
+// - input - the input bytes, as a string, Buffer, or Uint8Array
+// - key - optional key Uint8Array, up to 64 bytes
+// - outlen - optional output length in bytes, default 64
+function blake2bHex (input, key, outlen) {
+  var output = blake2b(input, key, outlen)
+  return util.toHex(output)
+}
+
+module.exports = {
+  blake2b: blake2b,
+  blake2bHex: blake2bHex,
+  blake2bInit: blake2bInit,
+  blake2bUpdate: blake2bUpdate,
+  blake2bFinal: blake2bFinal
+}
+
+},{"./util":21}],19:[function(require,module,exports){
+// BLAKE2s hash function in pure Javascript
+// Adapted from the reference implementation in RFC7693
+// Ported to Javascript by DC - https://github.com/dcposch
+
+var util = require('./util')
+
+// Little-endian byte access.
+// Expects a Uint8Array and an index
+// Returns the little-endian uint32 at v[i..i+3]
+function B2S_GET32 (v, i) {
+  return v[i] ^ (v[i + 1] << 8) ^ (v[i + 2] << 16) ^ (v[i + 3] << 24)
+}
+
+// Mixing function G.
+function B2S_G (a, b, c, d, x, y) {
+  v[a] = v[a] + v[b] + x
+  v[d] = ROTR32(v[d] ^ v[a], 16)
+  v[c] = v[c] + v[d]
+  v[b] = ROTR32(v[b] ^ v[c], 12)
+  v[a] = v[a] + v[b] + y
+  v[d] = ROTR32(v[d] ^ v[a], 8)
+  v[c] = v[c] + v[d]
+  v[b] = ROTR32(v[b] ^ v[c], 7)
+}
+
+// 32-bit right rotation
+// x should be a uint32
+// y must be between 1 and 31, inclusive
+function ROTR32 (x, y) {
+  return (x >>> y) ^ (x << (32 - y))
+}
+
+// Initialization Vector.
+var BLAKE2S_IV = new Uint32Array([
+  0x6A09E667, 0xBB67AE85, 0x3C6EF372, 0xA54FF53A,
+  0x510E527F, 0x9B05688C, 0x1F83D9AB, 0x5BE0CD19])
+
+var SIGMA = new Uint8Array([
+  0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+  14, 10, 4, 8, 9, 15, 13, 6, 1, 12, 0, 2, 11, 7, 5, 3,
+  11, 8, 12, 0, 5, 2, 15, 13, 10, 14, 3, 6, 7, 1, 9, 4,
+  7, 9, 3, 1, 13, 12, 11, 14, 2, 6, 5, 10, 4, 0, 15, 8,
+  9, 0, 5, 7, 2, 4, 10, 15, 14, 1, 11, 12, 6, 8, 3, 13,
+  2, 12, 6, 10, 0, 11, 8, 3, 4, 13, 7, 5, 15, 14, 1, 9,
+  12, 5, 1, 15, 14, 13, 4, 10, 0, 7, 6, 3, 9, 2, 8, 11,
+  13, 11, 7, 14, 12, 1, 3, 9, 5, 0, 15, 4, 8, 6, 2, 10,
+  6, 15, 14, 9, 11, 3, 0, 8, 12, 2, 13, 7, 1, 4, 10, 5,
+  10, 2, 8, 4, 7, 6, 1, 5, 15, 11, 9, 14, 3, 12, 13, 0])
+
+// Compression function. "last" flag indicates last block
+var v = new Uint32Array(16)
+var m = new Uint32Array(16)
+function blake2sCompress (ctx, last) {
+  var i = 0
+  for (i = 0; i < 8; i++) { // init work variables
+    v[i] = ctx.h[i]
+    v[i + 8] = BLAKE2S_IV[i]
+  }
+
+  v[12] ^= ctx.t // low 32 bits of offset
+  v[13] ^= (ctx.t / 0x100000000) // high 32 bits
+  if (last) { // last block flag set ?
+    v[14] = ~v[14]
+  }
+
+  for (i = 0; i < 16; i++) { // get little-endian words
+    m[i] = B2S_GET32(ctx.b, 4 * i)
+  }
+
+  // ten rounds of mixing
+  // uncomment the DebugPrint calls to log the computation
+  // and match the RFC sample documentation
+  // util.debugPrint('          m[16]', m, 32)
+  for (i = 0; i < 10; i++) {
+    // util.debugPrint('   (i=' + i + ')  v[16]', v, 32)
+    B2S_G(0, 4, 8, 12, m[SIGMA[i * 16 + 0]], m[SIGMA[i * 16 + 1]])
+    B2S_G(1, 5, 9, 13, m[SIGMA[i * 16 + 2]], m[SIGMA[i * 16 + 3]])
+    B2S_G(2, 6, 10, 14, m[SIGMA[i * 16 + 4]], m[SIGMA[i * 16 + 5]])
+    B2S_G(3, 7, 11, 15, m[SIGMA[i * 16 + 6]], m[SIGMA[i * 16 + 7]])
+    B2S_G(0, 5, 10, 15, m[SIGMA[i * 16 + 8]], m[SIGMA[i * 16 + 9]])
+    B2S_G(1, 6, 11, 12, m[SIGMA[i * 16 + 10]], m[SIGMA[i * 16 + 11]])
+    B2S_G(2, 7, 8, 13, m[SIGMA[i * 16 + 12]], m[SIGMA[i * 16 + 13]])
+    B2S_G(3, 4, 9, 14, m[SIGMA[i * 16 + 14]], m[SIGMA[i * 16 + 15]])
+  }
+  // util.debugPrint('   (i=10) v[16]', v, 32)
+
+  for (i = 0; i < 8; i++) {
+    ctx.h[i] ^= v[i] ^ v[i + 8]
+  }
+  // util.debugPrint('h[8]', ctx.h, 32)
+}
+
+// Creates a BLAKE2s hashing context
+// Requires an output length between 1 and 32 bytes
+// Takes an optional Uint8Array key
+function blake2sInit (outlen, key) {
+  if (!(outlen > 0 && outlen <= 32)) {
+    throw new Error('Incorrect output length, should be in [1, 32]')
+  }
+  var keylen = key ? key.length : 0
+  if (key && !(keylen > 0 && keylen <= 32)) {
+    throw new Error('Incorrect key length, should be in [1, 32]')
+  }
+
+  var ctx = {
+    h: new Uint32Array(BLAKE2S_IV), // hash state
+    b: new Uint32Array(64), // input block
+    c: 0, // pointer within block
+    t: 0, // input count
+    outlen: outlen // output length in bytes
+  }
+  ctx.h[0] ^= 0x01010000 ^ (keylen << 8) ^ outlen
+
+  if (keylen > 0) {
+    blake2sUpdate(ctx, key)
+    ctx.c = 64 // at the end
+  }
+
+  return ctx
+}
+
+// Updates a BLAKE2s streaming hash
+// Requires hash context and Uint8Array (byte array)
+function blake2sUpdate (ctx, input) {
+  for (var i = 0; i < input.length; i++) {
+    if (ctx.c === 64) { // buffer full ?
+      ctx.t += ctx.c // add counters
+      blake2sCompress(ctx, false) // compress (not last)
+      ctx.c = 0 // counter to zero
+    }
+    ctx.b[ctx.c++] = input[i]
+  }
+}
+
+// Completes a BLAKE2s streaming hash
+// Returns a Uint8Array containing the message digest
+function blake2sFinal (ctx) {
+  ctx.t += ctx.c // mark last block offset
+  while (ctx.c < 64) { // fill up with zeros
+    ctx.b[ctx.c++] = 0
+  }
+  blake2sCompress(ctx, true) // final block flag = 1
+
+  // little endian convert and store
+  var out = new Uint8Array(ctx.outlen)
+  for (var i = 0; i < ctx.outlen; i++) {
+    out[i] = (ctx.h[i >> 2] >> (8 * (i & 3))) & 0xFF
+  }
+  return out
+}
+
+// Computes the BLAKE2S hash of a string or byte array, and returns a Uint8Array
+//
+// Returns a n-byte Uint8Array
+//
+// Parameters:
+// - input - the input bytes, as a string, Buffer, or Uint8Array
+// - key - optional key Uint8Array, up to 32 bytes
+// - outlen - optional output length in bytes, default 64
+function blake2s (input, key, outlen) {
+  // preprocess inputs
+  outlen = outlen || 32
+  input = util.normalizeInput(input)
+
+  // do the math
+  var ctx = blake2sInit(outlen, key)
+  blake2sUpdate(ctx, input)
+  return blake2sFinal(ctx)
+}
+
+// Computes the BLAKE2S hash of a string or byte array
+//
+// Returns an n-byte hash in hex, all lowercase
+//
+// Parameters:
+// - input - the input bytes, as a string, Buffer, or Uint8Array
+// - key - optional key Uint8Array, up to 32 bytes
+// - outlen - optional output length in bytes, default 64
+function blake2sHex (input, key, outlen) {
+  var output = blake2s(input, key, outlen)
+  return util.toHex(output)
+}
+
+module.exports = {
+  blake2s: blake2s,
+  blake2sHex: blake2sHex,
+  blake2sInit: blake2sInit,
+  blake2sUpdate: blake2sUpdate,
+  blake2sFinal: blake2sFinal
+}
+
+},{"./util":21}],20:[function(require,module,exports){
+var b2b = require('./blake2b')
+var b2s = require('./blake2s')
+
+module.exports = {
+  blake2b: b2b.blake2b,
+  blake2bHex: b2b.blake2bHex,
+  blake2bInit: b2b.blake2bInit,
+  blake2bUpdate: b2b.blake2bUpdate,
+  blake2bFinal: b2b.blake2bFinal,
+  blake2s: b2s.blake2s,
+  blake2sHex: b2s.blake2sHex,
+  blake2sInit: b2s.blake2sInit,
+  blake2sUpdate: b2s.blake2sUpdate,
+  blake2sFinal: b2s.blake2sFinal
+}
+
+},{"./blake2b":18,"./blake2s":19}],21:[function(require,module,exports){
+(function (Buffer){
+var ERROR_MSG_INPUT = 'Input must be an string, Buffer or Uint8Array'
+
+// For convenience, let people hash a string, not just a Uint8Array
+function normalizeInput (input) {
+  var ret
+  if (input instanceof Uint8Array) {
+    ret = input
+  } else if (input instanceof Buffer) {
+    ret = new Uint8Array(input)
+  } else if (typeof (input) === 'string') {
+    ret = new Uint8Array(Buffer.from(input, 'utf8'))
+  } else {
+    throw new Error(ERROR_MSG_INPUT)
+  }
+  return ret
+}
+
+// Converts a Uint8Array to a hexadecimal string
+// For example, toHex([255, 0, 255]) returns "ff00ff"
+function toHex (bytes) {
+  return Array.prototype.map.call(bytes, function (n) {
+    return (n < 16 ? '0' : '') + n.toString(16)
+  }).join('')
+}
+
+// Converts any value in [0...2^32-1] to an 8-character hex string
+function uint32ToHex (val) {
+  return (0x100000000 + val).toString(16).substring(1)
+}
+
+// For debugging: prints out hash state in the same format as the RFC
+// sample computation exactly, so that you can diff
+function debugPrint (label, arr, size) {
+  var msg = '\n' + label + ' = '
+  for (var i = 0; i < arr.length; i += 2) {
+    if (size === 32) {
+      msg += uint32ToHex(arr[i]).toUpperCase()
+      msg += ' '
+      msg += uint32ToHex(arr[i + 1]).toUpperCase()
+    } else if (size === 64) {
+      msg += uint32ToHex(arr[i + 1]).toUpperCase()
+      msg += uint32ToHex(arr[i]).toUpperCase()
+    } else throw new Error('Invalid size ' + size)
+    if (i % 6 === 4) {
+      msg += '\n' + new Array(label.length + 4).join(' ')
+    } else if (i < arr.length - 2) {
+      msg += ' '
+    }
+  }
+  console.log(msg)
+}
+
+// For performance testing: generates N bytes of input, hashes M times
+// Measures and prints MB/second hash performance each time
+function testSpeed (hashFn, N, M) {
+  var startMs = new Date().getTime()
+
+  var input = new Uint8Array(N)
+  for (var i = 0; i < N; i++) {
+    input[i] = i % 256
+  }
+  var genMs = new Date().getTime()
+  console.log('Generated random input in ' + (genMs - startMs) + 'ms')
+  startMs = genMs
+
+  for (i = 0; i < M; i++) {
+    var hashHex = hashFn(input)
+    var hashMs = new Date().getTime()
+    var ms = hashMs - startMs
+    startMs = hashMs
+    console.log('Hashed in ' + ms + 'ms: ' + hashHex.substring(0, 20) + '...')
+    console.log(Math.round(N / (1 << 20) / (ms / 1000) * 100) / 100 + ' MB PER SECOND')
+  }
+}
+
+module.exports = {
+  normalizeInput: normalizeInput,
+  toHex: toHex,
+  debugPrint: debugPrint,
+  testSpeed: testSpeed
+}
+
+}).call(this,require("buffer").Buffer)
+},{"buffer":53}],22:[function(require,module,exports){
 (function (module, exports) {
   'use strict';
 
@@ -9104,7 +7501,7 @@ function fromByteArray (uint8) {
   };
 })(typeof module === 'undefined' || module, this);
 
-},{"buffer":22}],21:[function(require,module,exports){
+},{"buffer":24}],23:[function(require,module,exports){
 var r;
 
 module.exports = function rand(len) {
@@ -9171,9 +7568,9 @@ if (typeof self === 'object') {
   }
 }
 
-},{"crypto":22}],22:[function(require,module,exports){
+},{"crypto":24}],24:[function(require,module,exports){
 
-},{}],23:[function(require,module,exports){
+},{}],25:[function(require,module,exports){
 // based on the aes implimentation in triple sec
 // https://github.com/keybase/triplesec
 // which is in turn based on the one from crypto-js
@@ -9403,7 +7800,7 @@ AES.prototype.scrub = function () {
 
 module.exports.AES = AES
 
-},{"safe-buffer":147}],24:[function(require,module,exports){
+},{"safe-buffer":152}],26:[function(require,module,exports){
 var aes = require('./aes')
 var Buffer = require('safe-buffer').Buffer
 var Transform = require('cipher-base')
@@ -9522,7 +7919,7 @@ StreamCipher.prototype.setAAD = function setAAD (buf) {
 
 module.exports = StreamCipher
 
-},{"./aes":23,"./ghash":28,"./incr32":29,"buffer-xor":50,"cipher-base":52,"inherits":105,"safe-buffer":147}],25:[function(require,module,exports){
+},{"./aes":25,"./ghash":30,"./incr32":31,"buffer-xor":52,"cipher-base":54,"inherits":107,"safe-buffer":152}],27:[function(require,module,exports){
 var ciphers = require('./encrypter')
 var deciphers = require('./decrypter')
 var modes = require('./modes/list.json')
@@ -9537,7 +7934,7 @@ exports.createDecipher = exports.Decipher = deciphers.createDecipher
 exports.createDecipheriv = exports.Decipheriv = deciphers.createDecipheriv
 exports.listCiphers = exports.getCiphers = getCiphers
 
-},{"./decrypter":26,"./encrypter":27,"./modes/list.json":37}],26:[function(require,module,exports){
+},{"./decrypter":28,"./encrypter":29,"./modes/list.json":39}],28:[function(require,module,exports){
 var AuthCipher = require('./authCipher')
 var Buffer = require('safe-buffer').Buffer
 var MODES = require('./modes')
@@ -9660,7 +8057,7 @@ function createDecipher (suite, password) {
 exports.createDecipher = createDecipher
 exports.createDecipheriv = createDecipheriv
 
-},{"./aes":23,"./authCipher":24,"./modes":36,"./streamCipher":39,"cipher-base":52,"evp_bytestokey":88,"inherits":105,"safe-buffer":147}],27:[function(require,module,exports){
+},{"./aes":25,"./authCipher":26,"./modes":38,"./streamCipher":41,"cipher-base":54,"evp_bytestokey":90,"inherits":107,"safe-buffer":152}],29:[function(require,module,exports){
 var MODES = require('./modes')
 var AuthCipher = require('./authCipher')
 var Buffer = require('safe-buffer').Buffer
@@ -9776,7 +8173,7 @@ function createCipher (suite, password) {
 exports.createCipheriv = createCipheriv
 exports.createCipher = createCipher
 
-},{"./aes":23,"./authCipher":24,"./modes":36,"./streamCipher":39,"cipher-base":52,"evp_bytestokey":88,"inherits":105,"safe-buffer":147}],28:[function(require,module,exports){
+},{"./aes":25,"./authCipher":26,"./modes":38,"./streamCipher":41,"cipher-base":54,"evp_bytestokey":90,"inherits":107,"safe-buffer":152}],30:[function(require,module,exports){
 var Buffer = require('safe-buffer').Buffer
 var ZEROES = Buffer.alloc(16, 0)
 
@@ -9867,7 +8264,7 @@ GHASH.prototype.final = function (abl, bl) {
 
 module.exports = GHASH
 
-},{"safe-buffer":147}],29:[function(require,module,exports){
+},{"safe-buffer":152}],31:[function(require,module,exports){
 function incr32 (iv) {
   var len = iv.length
   var item
@@ -9884,7 +8281,7 @@ function incr32 (iv) {
 }
 module.exports = incr32
 
-},{}],30:[function(require,module,exports){
+},{}],32:[function(require,module,exports){
 var xor = require('buffer-xor')
 
 exports.encrypt = function (self, block) {
@@ -9903,7 +8300,7 @@ exports.decrypt = function (self, block) {
   return xor(out, pad)
 }
 
-},{"buffer-xor":50}],31:[function(require,module,exports){
+},{"buffer-xor":52}],33:[function(require,module,exports){
 var Buffer = require('safe-buffer').Buffer
 var xor = require('buffer-xor')
 
@@ -9938,7 +8335,7 @@ exports.encrypt = function (self, data, decrypt) {
   return out
 }
 
-},{"buffer-xor":50,"safe-buffer":147}],32:[function(require,module,exports){
+},{"buffer-xor":52,"safe-buffer":152}],34:[function(require,module,exports){
 var Buffer = require('safe-buffer').Buffer
 
 function encryptByte (self, byteParam, decrypt) {
@@ -9982,7 +8379,7 @@ exports.encrypt = function (self, chunk, decrypt) {
   return out
 }
 
-},{"safe-buffer":147}],33:[function(require,module,exports){
+},{"safe-buffer":152}],35:[function(require,module,exports){
 var Buffer = require('safe-buffer').Buffer
 
 function encryptByte (self, byteParam, decrypt) {
@@ -10009,7 +8406,7 @@ exports.encrypt = function (self, chunk, decrypt) {
   return out
 }
 
-},{"safe-buffer":147}],34:[function(require,module,exports){
+},{"safe-buffer":152}],36:[function(require,module,exports){
 var xor = require('buffer-xor')
 var Buffer = require('safe-buffer').Buffer
 var incr32 = require('../incr32')
@@ -10041,7 +8438,7 @@ exports.encrypt = function (self, chunk) {
   return xor(chunk, pad)
 }
 
-},{"../incr32":29,"buffer-xor":50,"safe-buffer":147}],35:[function(require,module,exports){
+},{"../incr32":31,"buffer-xor":52,"safe-buffer":152}],37:[function(require,module,exports){
 exports.encrypt = function (self, block) {
   return self._cipher.encryptBlock(block)
 }
@@ -10050,7 +8447,7 @@ exports.decrypt = function (self, block) {
   return self._cipher.decryptBlock(block)
 }
 
-},{}],36:[function(require,module,exports){
+},{}],38:[function(require,module,exports){
 var modeModules = {
   ECB: require('./ecb'),
   CBC: require('./cbc'),
@@ -10070,7 +8467,7 @@ for (var key in modes) {
 
 module.exports = modes
 
-},{"./cbc":30,"./cfb":31,"./cfb1":32,"./cfb8":33,"./ctr":34,"./ecb":35,"./list.json":37,"./ofb":38}],37:[function(require,module,exports){
+},{"./cbc":32,"./cfb":33,"./cfb1":34,"./cfb8":35,"./ctr":36,"./ecb":37,"./list.json":39,"./ofb":40}],39:[function(require,module,exports){
 module.exports={
   "aes-128-ecb": {
     "cipher": "AES",
@@ -10263,7 +8660,7 @@ module.exports={
   }
 }
 
-},{}],38:[function(require,module,exports){
+},{}],40:[function(require,module,exports){
 (function (Buffer){
 var xor = require('buffer-xor')
 
@@ -10283,7 +8680,7 @@ exports.encrypt = function (self, chunk) {
 }
 
 }).call(this,require("buffer").Buffer)
-},{"buffer":51,"buffer-xor":50}],39:[function(require,module,exports){
+},{"buffer":53,"buffer-xor":52}],41:[function(require,module,exports){
 var aes = require('./aes')
 var Buffer = require('safe-buffer').Buffer
 var Transform = require('cipher-base')
@@ -10312,7 +8709,7 @@ StreamCipher.prototype._final = function () {
 
 module.exports = StreamCipher
 
-},{"./aes":23,"cipher-base":52,"inherits":105,"safe-buffer":147}],40:[function(require,module,exports){
+},{"./aes":25,"cipher-base":54,"inherits":107,"safe-buffer":152}],42:[function(require,module,exports){
 var ebtk = require('evp_bytestokey')
 var aes = require('browserify-aes/browser')
 var DES = require('browserify-des')
@@ -10387,7 +8784,7 @@ function getCiphers () {
 }
 exports.listCiphers = exports.getCiphers = getCiphers
 
-},{"browserify-aes/browser":25,"browserify-aes/modes":36,"browserify-des":41,"browserify-des/modes":42,"evp_bytestokey":88}],41:[function(require,module,exports){
+},{"browserify-aes/browser":27,"browserify-aes/modes":38,"browserify-des":43,"browserify-des/modes":44,"evp_bytestokey":90}],43:[function(require,module,exports){
 (function (Buffer){
 var CipherBase = require('cipher-base')
 var des = require('des.js')
@@ -10434,7 +8831,7 @@ DES.prototype._final = function () {
 }
 
 }).call(this,require("buffer").Buffer)
-},{"buffer":51,"cipher-base":52,"des.js":61,"inherits":105}],42:[function(require,module,exports){
+},{"buffer":53,"cipher-base":54,"des.js":63,"inherits":107}],44:[function(require,module,exports){
 exports['des-ecb'] = {
   key: 8,
   iv: 0
@@ -10460,7 +8857,7 @@ exports['des-ede'] = {
   iv: 0
 }
 
-},{}],43:[function(require,module,exports){
+},{}],45:[function(require,module,exports){
 (function (Buffer){
 var bn = require('bn.js');
 var randomBytes = require('randombytes');
@@ -10504,10 +8901,10 @@ function getr(priv) {
 }
 
 }).call(this,require("buffer").Buffer)
-},{"bn.js":20,"buffer":51,"randombytes":131}],44:[function(require,module,exports){
+},{"bn.js":22,"buffer":53,"randombytes":136}],46:[function(require,module,exports){
 module.exports = require('./browser/algorithms.json')
 
-},{"./browser/algorithms.json":45}],45:[function(require,module,exports){
+},{"./browser/algorithms.json":47}],47:[function(require,module,exports){
 module.exports={
   "sha224WithRSAEncryption": {
     "sign": "rsa",
@@ -10661,7 +9058,7 @@ module.exports={
   }
 }
 
-},{}],46:[function(require,module,exports){
+},{}],48:[function(require,module,exports){
 module.exports={
   "1.3.132.0.10": "secp256k1",
   "1.3.132.0.33": "p224",
@@ -10671,7 +9068,7 @@ module.exports={
   "1.3.132.0.35": "p521"
 }
 
-},{}],47:[function(require,module,exports){
+},{}],49:[function(require,module,exports){
 (function (Buffer){
 var createHash = require('create-hash')
 var stream = require('stream')
@@ -10766,7 +9163,7 @@ module.exports = {
 }
 
 }).call(this,require("buffer").Buffer)
-},{"./algorithms.json":45,"./sign":48,"./verify":49,"buffer":51,"create-hash":55,"inherits":105,"stream":156}],48:[function(require,module,exports){
+},{"./algorithms.json":47,"./sign":50,"./verify":51,"buffer":53,"create-hash":57,"inherits":107,"stream":161}],50:[function(require,module,exports){
 (function (Buffer){
 // much of this based on https://github.com/indutny/self-signed/blob/gh-pages/lib/rsa.js
 var createHmac = require('create-hmac')
@@ -10915,7 +9312,7 @@ module.exports.getKey = getKey
 module.exports.makeKey = makeKey
 
 }).call(this,require("buffer").Buffer)
-},{"./curves.json":46,"bn.js":20,"browserify-rsa":43,"buffer":51,"create-hmac":58,"elliptic":71,"parse-asn1":117}],49:[function(require,module,exports){
+},{"./curves.json":48,"bn.js":22,"browserify-rsa":45,"buffer":53,"create-hmac":60,"elliptic":73,"parse-asn1":119}],51:[function(require,module,exports){
 (function (Buffer){
 // much of this based on https://github.com/indutny/self-signed/blob/gh-pages/lib/rsa.js
 var BN = require('bn.js')
@@ -11002,7 +9399,7 @@ function checkValue (b, q) {
 module.exports = verify
 
 }).call(this,require("buffer").Buffer)
-},{"./curves.json":46,"bn.js":20,"buffer":51,"elliptic":71,"parse-asn1":117}],50:[function(require,module,exports){
+},{"./curves.json":48,"bn.js":22,"buffer":53,"elliptic":73,"parse-asn1":119}],52:[function(require,module,exports){
 (function (Buffer){
 module.exports = function xor (a, b) {
   var length = Math.min(a.length, b.length)
@@ -11016,7 +9413,7 @@ module.exports = function xor (a, b) {
 }
 
 }).call(this,require("buffer").Buffer)
-},{"buffer":51}],51:[function(require,module,exports){
+},{"buffer":53}],53:[function(require,module,exports){
 /*!
  * The buffer module from node.js, for the browser.
  *
@@ -12732,7 +11129,7 @@ function numberIsNaN (obj) {
   return obj !== obj // eslint-disable-line no-self-compare
 }
 
-},{"base64-js":19,"ieee754":103}],52:[function(require,module,exports){
+},{"base64-js":17,"ieee754":105}],54:[function(require,module,exports){
 var Buffer = require('safe-buffer').Buffer
 var Transform = require('stream').Transform
 var StringDecoder = require('string_decoder').StringDecoder
@@ -12833,7 +11230,7 @@ CipherBase.prototype._toString = function (value, enc, fin) {
 
 module.exports = CipherBase
 
-},{"inherits":105,"safe-buffer":147,"stream":156,"string_decoder":157}],53:[function(require,module,exports){
+},{"inherits":107,"safe-buffer":152,"stream":161,"string_decoder":162}],55:[function(require,module,exports){
 (function (Buffer){
 // Copyright Joyent, Inc. and other Node contributors.
 //
@@ -12944,7 +11341,7 @@ function objectToString(o) {
 }
 
 }).call(this,{"isBuffer":require("../../is-buffer/index.js")})
-},{"../../is-buffer/index.js":106}],54:[function(require,module,exports){
+},{"../../is-buffer/index.js":108}],56:[function(require,module,exports){
 (function (Buffer){
 var elliptic = require('elliptic');
 var BN = require('bn.js');
@@ -13070,7 +11467,7 @@ function formatReturnValue(bn, enc, len) {
 }
 
 }).call(this,require("buffer").Buffer)
-},{"bn.js":20,"buffer":51,"elliptic":71}],55:[function(require,module,exports){
+},{"bn.js":22,"buffer":53,"elliptic":73}],57:[function(require,module,exports){
 (function (Buffer){
 'use strict'
 var inherits = require('inherits')
@@ -13126,7 +11523,7 @@ module.exports = function createHash (alg) {
 }
 
 }).call(this,require("buffer").Buffer)
-},{"./md5":57,"buffer":51,"cipher-base":52,"inherits":105,"ripemd160":146,"sha.js":149}],56:[function(require,module,exports){
+},{"./md5":59,"buffer":53,"cipher-base":54,"inherits":107,"ripemd160":151,"sha.js":154}],58:[function(require,module,exports){
 (function (Buffer){
 'use strict'
 var intSize = 4
@@ -13160,7 +11557,7 @@ module.exports = function hash (buf, fn) {
 }
 
 }).call(this,require("buffer").Buffer)
-},{"buffer":51}],57:[function(require,module,exports){
+},{"buffer":53}],59:[function(require,module,exports){
 'use strict'
 /*
  * A JavaScript implementation of the RSA Data Security, Inc. MD5 Message
@@ -13313,7 +11710,7 @@ module.exports = function md5 (buf) {
   return makeHash(buf, core_md5)
 }
 
-},{"./make-hash":56}],58:[function(require,module,exports){
+},{"./make-hash":58}],60:[function(require,module,exports){
 'use strict'
 var inherits = require('inherits')
 var Legacy = require('./legacy')
@@ -13377,7 +11774,7 @@ module.exports = function createHmac (alg, key) {
   return new Hmac(alg, key)
 }
 
-},{"./legacy":59,"cipher-base":52,"create-hash/md5":57,"inherits":105,"ripemd160":146,"safe-buffer":147,"sha.js":149}],59:[function(require,module,exports){
+},{"./legacy":61,"cipher-base":54,"create-hash/md5":59,"inherits":107,"ripemd160":151,"safe-buffer":152,"sha.js":154}],61:[function(require,module,exports){
 'use strict'
 var inherits = require('inherits')
 var Buffer = require('safe-buffer').Buffer
@@ -13425,7 +11822,7 @@ Hmac.prototype._final = function () {
 }
 module.exports = Hmac
 
-},{"cipher-base":52,"inherits":105,"safe-buffer":147}],60:[function(require,module,exports){
+},{"cipher-base":54,"inherits":107,"safe-buffer":152}],62:[function(require,module,exports){
 'use strict'
 
 exports.randomBytes = exports.rng = exports.pseudoRandomBytes = exports.prng = require('randombytes')
@@ -13524,7 +11921,7 @@ exports.constants = {
   'POINT_CONVERSION_HYBRID': 6
 }
 
-},{"browserify-cipher":40,"browserify-sign":47,"browserify-sign/algos":44,"create-ecdh":54,"create-hash":55,"create-hmac":58,"diffie-hellman":67,"pbkdf2":118,"public-encrypt":125,"randombytes":131,"randomfill":132}],61:[function(require,module,exports){
+},{"browserify-cipher":42,"browserify-sign":49,"browserify-sign/algos":46,"create-ecdh":56,"create-hash":57,"create-hmac":60,"diffie-hellman":69,"pbkdf2":120,"public-encrypt":127,"randombytes":136,"randomfill":137}],63:[function(require,module,exports){
 'use strict';
 
 exports.utils = require('./des/utils');
@@ -13533,7 +11930,7 @@ exports.DES = require('./des/des');
 exports.CBC = require('./des/cbc');
 exports.EDE = require('./des/ede');
 
-},{"./des/cbc":62,"./des/cipher":63,"./des/des":64,"./des/ede":65,"./des/utils":66}],62:[function(require,module,exports){
+},{"./des/cbc":64,"./des/cipher":65,"./des/des":66,"./des/ede":67,"./des/utils":68}],64:[function(require,module,exports){
 'use strict';
 
 var assert = require('minimalistic-assert');
@@ -13600,7 +11997,7 @@ proto._update = function _update(inp, inOff, out, outOff) {
   }
 };
 
-},{"inherits":105,"minimalistic-assert":111}],63:[function(require,module,exports){
+},{"inherits":107,"minimalistic-assert":113}],65:[function(require,module,exports){
 'use strict';
 
 var assert = require('minimalistic-assert');
@@ -13743,7 +12140,7 @@ Cipher.prototype._finalDecrypt = function _finalDecrypt() {
   return this._unpad(out);
 };
 
-},{"minimalistic-assert":111}],64:[function(require,module,exports){
+},{"minimalistic-assert":113}],66:[function(require,module,exports){
 'use strict';
 
 var assert = require('minimalistic-assert');
@@ -13888,7 +12285,7 @@ DES.prototype._decrypt = function _decrypt(state, lStart, rStart, out, off) {
   utils.rip(l, r, out, off);
 };
 
-},{"../des":61,"inherits":105,"minimalistic-assert":111}],65:[function(require,module,exports){
+},{"../des":63,"inherits":107,"minimalistic-assert":113}],67:[function(require,module,exports){
 'use strict';
 
 var assert = require('minimalistic-assert');
@@ -13945,7 +12342,7 @@ EDE.prototype._update = function _update(inp, inOff, out, outOff) {
 EDE.prototype._pad = DES.prototype._pad;
 EDE.prototype._unpad = DES.prototype._unpad;
 
-},{"../des":61,"inherits":105,"minimalistic-assert":111}],66:[function(require,module,exports){
+},{"../des":63,"inherits":107,"minimalistic-assert":113}],68:[function(require,module,exports){
 'use strict';
 
 exports.readUInt32BE = function readUInt32BE(bytes, off) {
@@ -14203,7 +12600,7 @@ exports.padSplit = function padSplit(num, size, group) {
   return out.join(' ');
 };
 
-},{}],67:[function(require,module,exports){
+},{}],69:[function(require,module,exports){
 (function (Buffer){
 var generatePrime = require('./lib/generatePrime')
 var primes = require('./lib/primes.json')
@@ -14249,7 +12646,7 @@ exports.DiffieHellmanGroup = exports.createDiffieHellmanGroup = exports.getDiffi
 exports.createDiffieHellman = exports.DiffieHellman = createDiffieHellman
 
 }).call(this,require("buffer").Buffer)
-},{"./lib/dh":68,"./lib/generatePrime":69,"./lib/primes.json":70,"buffer":51}],68:[function(require,module,exports){
+},{"./lib/dh":70,"./lib/generatePrime":71,"./lib/primes.json":72,"buffer":53}],70:[function(require,module,exports){
 (function (Buffer){
 var BN = require('bn.js');
 var MillerRabin = require('miller-rabin');
@@ -14417,7 +12814,7 @@ function formatReturnValue(bn, enc) {
 }
 
 }).call(this,require("buffer").Buffer)
-},{"./generatePrime":69,"bn.js":20,"buffer":51,"miller-rabin":110,"randombytes":131}],69:[function(require,module,exports){
+},{"./generatePrime":71,"bn.js":22,"buffer":53,"miller-rabin":112,"randombytes":136}],71:[function(require,module,exports){
 var randomBytes = require('randombytes');
 module.exports = findPrime;
 findPrime.simpleSieve = simpleSieve;
@@ -14524,7 +12921,7 @@ function findPrime(bits, gen) {
 
 }
 
-},{"bn.js":20,"miller-rabin":110,"randombytes":131}],70:[function(require,module,exports){
+},{"bn.js":22,"miller-rabin":112,"randombytes":136}],72:[function(require,module,exports){
 module.exports={
     "modp1": {
         "gen": "02",
@@ -14559,7 +12956,7 @@ module.exports={
         "prime": "ffffffffffffffffc90fdaa22168c234c4c6628b80dc1cd129024e088a67cc74020bbea63b139b22514a08798e3404ddef9519b3cd3a431b302b0a6df25f14374fe1356d6d51c245e485b576625e7ec6f44c42e9a637ed6b0bff5cb6f406b7edee386bfb5a899fa5ae9f24117c4b1fe649286651ece45b3dc2007cb8a163bf0598da48361c55d39a69163fa8fd24cf5f83655d23dca3ad961c62f356208552bb9ed529077096966d670c354e4abc9804f1746c08ca18217c32905e462e36ce3be39e772c180e86039b2783a2ec07a28fb5c55df06f4c52c9de2bcbf6955817183995497cea956ae515d2261898fa051015728e5a8aaac42dad33170d04507a33a85521abdf1cba64ecfb850458dbef0a8aea71575d060c7db3970f85a6e1e4c7abf5ae8cdb0933d71e8c94e04a25619dcee3d2261ad2ee6bf12ffa06d98a0864d87602733ec86a64521f2b18177b200cbbe117577a615d6c770988c0bad946e208e24fa074e5ab3143db5bfce0fd108e4b82d120a92108011a723c12a787e6d788719a10bdba5b2699c327186af4e23c1a946834b6150bda2583e9ca2ad44ce8dbbbc2db04de8ef92e8efc141fbecaa6287c59474e6bc05d99b2964fa090c3a2233ba186515be7ed1f612970cee2d7afb81bdd762170481cd0069127d5b05aa993b4ea988d8fddc186ffb7dc90a6c08f4df435c93402849236c3fab4d27c7026c1d4dcb2602646dec9751e763dba37bdf8ff9406ad9e530ee5db382f413001aeb06a53ed9027d831179727b0865a8918da3edbebcf9b14ed44ce6cbaced4bb1bdb7f1447e6cc254b332051512bd7af426fb8f401378cd2bf5983ca01c64b92ecf032ea15d1721d03f482d7ce6e74fef6d55e702f46980c82b5a84031900b1c9e59e7c97fbec7e8f323a97a7e36cc88be0f1d45b7ff585ac54bd407b22b4154aacc8f6d7ebf48e1d814cc5ed20f8037e0a79715eef29be32806a1d58bb7c5da76f550aa3d8a1fbff0eb19ccb1a313d55cda56c9ec2ef29632387fe8d76e3c0468043e8f663f4860ee12bf2d5b0b7474d6e694f91e6dbe115974a3926f12fee5e438777cb6a932df8cd8bec4d073b931ba3bc832b68d9dd300741fa7bf8afc47ed2576f6936ba424663aab639c5ae4f5683423b4742bf1c978238f16cbe39d652de3fdb8befc848ad922222e04a4037c0713eb57a81a23f0c73473fc646cea306b4bcbc8862f8385ddfa9d4b7fa2c087e879683303ed5bdd3a062b3cf5b3a278a66d2a13f83f44f82ddf310ee074ab6a364597e899a0255dc164f31cc50846851df9ab48195ded7ea1b1d510bd7ee74d73faf36bc31ecfa268359046f4eb879f924009438b481c6cd7889a002ed5ee382bc9190da6fc026e479558e4475677e9aa9e3050e2765694dfc81f56e880b96e7160c980dd98edd3dfffffffffffffffff"
     }
 }
-},{}],71:[function(require,module,exports){
+},{}],73:[function(require,module,exports){
 'use strict';
 
 var elliptic = exports;
@@ -14574,7 +12971,7 @@ elliptic.curves = require('./elliptic/curves');
 elliptic.ec = require('./elliptic/ec');
 elliptic.eddsa = require('./elliptic/eddsa');
 
-},{"../package.json":86,"./elliptic/curve":74,"./elliptic/curves":77,"./elliptic/ec":78,"./elliptic/eddsa":81,"./elliptic/utils":85,"brorand":21}],72:[function(require,module,exports){
+},{"../package.json":88,"./elliptic/curve":76,"./elliptic/curves":79,"./elliptic/ec":80,"./elliptic/eddsa":83,"./elliptic/utils":87,"brorand":23}],74:[function(require,module,exports){
 'use strict';
 
 var BN = require('bn.js');
@@ -14951,7 +13348,7 @@ BasePoint.prototype.dblp = function dblp(k) {
   return r;
 };
 
-},{"../../elliptic":71,"bn.js":20}],73:[function(require,module,exports){
+},{"../../elliptic":73,"bn.js":22}],75:[function(require,module,exports){
 'use strict';
 
 var curve = require('../curve');
@@ -15386,7 +13783,7 @@ Point.prototype.eqXToP = function eqXToP(x) {
 Point.prototype.toP = Point.prototype.normalize;
 Point.prototype.mixedAdd = Point.prototype.add;
 
-},{"../../elliptic":71,"../curve":74,"bn.js":20,"inherits":105}],74:[function(require,module,exports){
+},{"../../elliptic":73,"../curve":76,"bn.js":22,"inherits":107}],76:[function(require,module,exports){
 'use strict';
 
 var curve = exports;
@@ -15396,7 +13793,7 @@ curve.short = require('./short');
 curve.mont = require('./mont');
 curve.edwards = require('./edwards');
 
-},{"./base":72,"./edwards":73,"./mont":75,"./short":76}],75:[function(require,module,exports){
+},{"./base":74,"./edwards":75,"./mont":77,"./short":78}],77:[function(require,module,exports){
 'use strict';
 
 var curve = require('../curve');
@@ -15578,7 +13975,7 @@ Point.prototype.getX = function getX() {
   return this.x.fromRed();
 };
 
-},{"../../elliptic":71,"../curve":74,"bn.js":20,"inherits":105}],76:[function(require,module,exports){
+},{"../../elliptic":73,"../curve":76,"bn.js":22,"inherits":107}],78:[function(require,module,exports){
 'use strict';
 
 var curve = require('../curve');
@@ -16518,7 +14915,7 @@ JPoint.prototype.isInfinity = function isInfinity() {
   return this.z.cmpn(0) === 0;
 };
 
-},{"../../elliptic":71,"../curve":74,"bn.js":20,"inherits":105}],77:[function(require,module,exports){
+},{"../../elliptic":73,"../curve":76,"bn.js":22,"inherits":107}],79:[function(require,module,exports){
 'use strict';
 
 var curves = exports;
@@ -16725,7 +15122,7 @@ defineCurve('secp256k1', {
   ]
 });
 
-},{"../elliptic":71,"./precomputed/secp256k1":84,"hash.js":90}],78:[function(require,module,exports){
+},{"../elliptic":73,"./precomputed/secp256k1":86,"hash.js":92}],80:[function(require,module,exports){
 'use strict';
 
 var BN = require('bn.js');
@@ -16967,7 +15364,7 @@ EC.prototype.getKeyRecoveryParam = function(e, signature, Q, enc) {
   throw new Error('Unable to find valid recovery factor');
 };
 
-},{"../../elliptic":71,"./key":79,"./signature":80,"bn.js":20,"hmac-drbg":102}],79:[function(require,module,exports){
+},{"../../elliptic":73,"./key":81,"./signature":82,"bn.js":22,"hmac-drbg":104}],81:[function(require,module,exports){
 'use strict';
 
 var BN = require('bn.js');
@@ -17088,7 +15485,7 @@ KeyPair.prototype.inspect = function inspect() {
          ' pub: ' + (this.pub && this.pub.inspect()) + ' >';
 };
 
-},{"../../elliptic":71,"bn.js":20}],80:[function(require,module,exports){
+},{"../../elliptic":73,"bn.js":22}],82:[function(require,module,exports){
 'use strict';
 
 var BN = require('bn.js');
@@ -17225,7 +15622,7 @@ Signature.prototype.toDER = function toDER(enc) {
   return utils.encode(res, enc);
 };
 
-},{"../../elliptic":71,"bn.js":20}],81:[function(require,module,exports){
+},{"../../elliptic":73,"bn.js":22}],83:[function(require,module,exports){
 'use strict';
 
 var hash = require('hash.js');
@@ -17345,7 +15742,7 @@ EDDSA.prototype.isPoint = function isPoint(val) {
   return val instanceof this.pointClass;
 };
 
-},{"../../elliptic":71,"./key":82,"./signature":83,"hash.js":90}],82:[function(require,module,exports){
+},{"../../elliptic":73,"./key":84,"./signature":85,"hash.js":92}],84:[function(require,module,exports){
 'use strict';
 
 var elliptic = require('../../elliptic');
@@ -17443,7 +15840,7 @@ KeyPair.prototype.getPublic = function getPublic(enc) {
 
 module.exports = KeyPair;
 
-},{"../../elliptic":71}],83:[function(require,module,exports){
+},{"../../elliptic":73}],85:[function(require,module,exports){
 'use strict';
 
 var BN = require('bn.js');
@@ -17511,7 +15908,7 @@ Signature.prototype.toHex = function toHex() {
 
 module.exports = Signature;
 
-},{"../../elliptic":71,"bn.js":20}],84:[function(require,module,exports){
+},{"../../elliptic":73,"bn.js":22}],86:[function(require,module,exports){
 module.exports = {
   doubles: {
     step: 4,
@@ -18293,7 +16690,7 @@ module.exports = {
   }
 };
 
-},{}],85:[function(require,module,exports){
+},{}],87:[function(require,module,exports){
 'use strict';
 
 var utils = exports;
@@ -18415,7 +16812,7 @@ function intFromLE(bytes) {
 utils.intFromLE = intFromLE;
 
 
-},{"bn.js":20,"minimalistic-assert":111,"minimalistic-crypto-utils":112}],86:[function(require,module,exports){
+},{"bn.js":22,"minimalistic-assert":113,"minimalistic-crypto-utils":114}],88:[function(require,module,exports){
 module.exports={
   "_from": "elliptic@^6.0.0",
   "_id": "elliptic@6.4.0",
@@ -18504,7 +16901,7 @@ module.exports={
   "version": "6.4.0"
 }
 
-},{}],87:[function(require,module,exports){
+},{}],89:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -18808,7 +17205,7 @@ function isUndefined(arg) {
   return arg === void 0;
 }
 
-},{}],88:[function(require,module,exports){
+},{}],90:[function(require,module,exports){
 var Buffer = require('safe-buffer').Buffer
 var MD5 = require('md5.js')
 
@@ -18855,7 +17252,7 @@ function EVP_BytesToKey (password, salt, keyBits, ivLen) {
 
 module.exports = EVP_BytesToKey
 
-},{"md5.js":108,"safe-buffer":147}],89:[function(require,module,exports){
+},{"md5.js":110,"safe-buffer":152}],91:[function(require,module,exports){
 (function (Buffer){
 'use strict'
 var Transform = require('stream').Transform
@@ -18942,7 +17339,7 @@ HashBase.prototype._digest = function () {
 module.exports = HashBase
 
 }).call(this,require("buffer").Buffer)
-},{"buffer":51,"inherits":105,"stream":156}],90:[function(require,module,exports){
+},{"buffer":53,"inherits":107,"stream":161}],92:[function(require,module,exports){
 var hash = exports;
 
 hash.utils = require('./hash/utils');
@@ -18959,7 +17356,7 @@ hash.sha384 = hash.sha.sha384;
 hash.sha512 = hash.sha.sha512;
 hash.ripemd160 = hash.ripemd.ripemd160;
 
-},{"./hash/common":91,"./hash/hmac":92,"./hash/ripemd":93,"./hash/sha":94,"./hash/utils":101}],91:[function(require,module,exports){
+},{"./hash/common":93,"./hash/hmac":94,"./hash/ripemd":95,"./hash/sha":96,"./hash/utils":103}],93:[function(require,module,exports){
 'use strict';
 
 var utils = require('./utils');
@@ -19053,7 +17450,7 @@ BlockHash.prototype._pad = function pad() {
   return res;
 };
 
-},{"./utils":101,"minimalistic-assert":111}],92:[function(require,module,exports){
+},{"./utils":103,"minimalistic-assert":113}],94:[function(require,module,exports){
 'use strict';
 
 var utils = require('./utils');
@@ -19102,7 +17499,7 @@ Hmac.prototype.digest = function digest(enc) {
   return this.outer.digest(enc);
 };
 
-},{"./utils":101,"minimalistic-assert":111}],93:[function(require,module,exports){
+},{"./utils":103,"minimalistic-assert":113}],95:[function(require,module,exports){
 'use strict';
 
 var utils = require('./utils');
@@ -19250,7 +17647,7 @@ var sh = [
   8, 5, 12, 9, 12, 5, 14, 6, 8, 13, 6, 5, 15, 13, 11, 11
 ];
 
-},{"./common":91,"./utils":101}],94:[function(require,module,exports){
+},{"./common":93,"./utils":103}],96:[function(require,module,exports){
 'use strict';
 
 exports.sha1 = require('./sha/1');
@@ -19259,7 +17656,7 @@ exports.sha256 = require('./sha/256');
 exports.sha384 = require('./sha/384');
 exports.sha512 = require('./sha/512');
 
-},{"./sha/1":95,"./sha/224":96,"./sha/256":97,"./sha/384":98,"./sha/512":99}],95:[function(require,module,exports){
+},{"./sha/1":97,"./sha/224":98,"./sha/256":99,"./sha/384":100,"./sha/512":101}],97:[function(require,module,exports){
 'use strict';
 
 var utils = require('../utils');
@@ -19335,7 +17732,7 @@ SHA1.prototype._digest = function digest(enc) {
     return utils.split32(this.h, 'big');
 };
 
-},{"../common":91,"../utils":101,"./common":100}],96:[function(require,module,exports){
+},{"../common":93,"../utils":103,"./common":102}],98:[function(require,module,exports){
 'use strict';
 
 var utils = require('../utils');
@@ -19367,7 +17764,7 @@ SHA224.prototype._digest = function digest(enc) {
 };
 
 
-},{"../utils":101,"./256":97}],97:[function(require,module,exports){
+},{"../utils":103,"./256":99}],99:[function(require,module,exports){
 'use strict';
 
 var utils = require('../utils');
@@ -19474,7 +17871,7 @@ SHA256.prototype._digest = function digest(enc) {
     return utils.split32(this.h, 'big');
 };
 
-},{"../common":91,"../utils":101,"./common":100,"minimalistic-assert":111}],98:[function(require,module,exports){
+},{"../common":93,"../utils":103,"./common":102,"minimalistic-assert":113}],100:[function(require,module,exports){
 'use strict';
 
 var utils = require('../utils');
@@ -19511,7 +17908,7 @@ SHA384.prototype._digest = function digest(enc) {
     return utils.split32(this.h.slice(0, 12), 'big');
 };
 
-},{"../utils":101,"./512":99}],99:[function(require,module,exports){
+},{"../utils":103,"./512":101}],101:[function(require,module,exports){
 'use strict';
 
 var utils = require('../utils');
@@ -19843,7 +18240,7 @@ function g1_512_lo(xh, xl) {
   return r;
 }
 
-},{"../common":91,"../utils":101,"minimalistic-assert":111}],100:[function(require,module,exports){
+},{"../common":93,"../utils":103,"minimalistic-assert":113}],102:[function(require,module,exports){
 'use strict';
 
 var utils = require('../utils');
@@ -19894,7 +18291,7 @@ function g1_256(x) {
 }
 exports.g1_256 = g1_256;
 
-},{"../utils":101}],101:[function(require,module,exports){
+},{"../utils":103}],103:[function(require,module,exports){
 'use strict';
 
 var assert = require('minimalistic-assert');
@@ -20149,7 +18546,7 @@ function shr64_lo(ah, al, num) {
 }
 exports.shr64_lo = shr64_lo;
 
-},{"inherits":105,"minimalistic-assert":111}],102:[function(require,module,exports){
+},{"inherits":107,"minimalistic-assert":113}],104:[function(require,module,exports){
 'use strict';
 
 var hash = require('hash.js');
@@ -20264,7 +18661,7 @@ HmacDRBG.prototype.generate = function generate(len, enc, add, addEnc) {
   return utils.encode(res, enc);
 };
 
-},{"hash.js":90,"minimalistic-assert":111,"minimalistic-crypto-utils":112}],103:[function(require,module,exports){
+},{"hash.js":92,"minimalistic-assert":113,"minimalistic-crypto-utils":114}],105:[function(require,module,exports){
 exports.read = function (buffer, offset, isLE, mLen, nBytes) {
   var e, m
   var eLen = nBytes * 8 - mLen - 1
@@ -20350,7 +18747,7 @@ exports.write = function (buffer, value, offset, isLE, mLen, nBytes) {
   buffer[offset + i - d] |= s * 128
 }
 
-},{}],104:[function(require,module,exports){
+},{}],106:[function(require,module,exports){
 
 var indexOf = [].indexOf;
 
@@ -20361,7 +18758,7 @@ module.exports = function(arr, obj){
   }
   return -1;
 };
-},{}],105:[function(require,module,exports){
+},{}],107:[function(require,module,exports){
 if (typeof Object.create === 'function') {
   // implementation from standard node.js 'util' module
   module.exports = function inherits(ctor, superCtor) {
@@ -20386,7 +18783,7 @@ if (typeof Object.create === 'function') {
   }
 }
 
-},{}],106:[function(require,module,exports){
+},{}],108:[function(require,module,exports){
 /*!
  * Determine if an object is a Buffer
  *
@@ -20409,14 +18806,14 @@ function isSlowBuffer (obj) {
   return typeof obj.readFloatLE === 'function' && typeof obj.slice === 'function' && isBuffer(obj.slice(0, 0))
 }
 
-},{}],107:[function(require,module,exports){
+},{}],109:[function(require,module,exports){
 var toString = {}.toString;
 
 module.exports = Array.isArray || function (arr) {
   return toString.call(arr) == '[object Array]';
 };
 
-},{}],108:[function(require,module,exports){
+},{}],110:[function(require,module,exports){
 (function (Buffer){
 'use strict'
 var inherits = require('inherits')
@@ -20565,7 +18962,7 @@ function fnI (a, b, c, d, m, k, s) {
 module.exports = MD5
 
 }).call(this,require("buffer").Buffer)
-},{"buffer":51,"hash-base":109,"inherits":105}],109:[function(require,module,exports){
+},{"buffer":53,"hash-base":111,"inherits":107}],111:[function(require,module,exports){
 'use strict'
 var Buffer = require('safe-buffer').Buffer
 var Transform = require('stream').Transform
@@ -20662,7 +19059,7 @@ HashBase.prototype._digest = function () {
 
 module.exports = HashBase
 
-},{"inherits":105,"safe-buffer":147,"stream":156}],110:[function(require,module,exports){
+},{"inherits":107,"safe-buffer":152,"stream":161}],112:[function(require,module,exports){
 var bn = require('bn.js');
 var brorand = require('brorand');
 
@@ -20779,7 +19176,7 @@ MillerRabin.prototype.getDivisor = function getDivisor(n, k) {
   return false;
 };
 
-},{"bn.js":20,"brorand":21}],111:[function(require,module,exports){
+},{"bn.js":22,"brorand":23}],113:[function(require,module,exports){
 module.exports = assert;
 
 function assert(val, msg) {
@@ -20792,7 +19189,7 @@ assert.equal = function assertEqual(l, r, msg) {
     throw new Error(msg || ('Assertion failed: ' + l + ' != ' + r));
 };
 
-},{}],112:[function(require,module,exports){
+},{}],114:[function(require,module,exports){
 'use strict';
 
 var utils = exports;
@@ -20852,7 +19249,7 @@ utils.encode = function encode(arr, enc) {
     return arr;
 };
 
-},{}],113:[function(require,module,exports){
+},{}],115:[function(require,module,exports){
 module.exports={"2.16.840.1.101.3.4.1.1": "aes-128-ecb",
 "2.16.840.1.101.3.4.1.2": "aes-128-cbc",
 "2.16.840.1.101.3.4.1.3": "aes-128-ofb",
@@ -20866,7 +19263,7 @@ module.exports={"2.16.840.1.101.3.4.1.1": "aes-128-ecb",
 "2.16.840.1.101.3.4.1.43": "aes-256-ofb",
 "2.16.840.1.101.3.4.1.44": "aes-256-cfb"
 }
-},{}],114:[function(require,module,exports){
+},{}],116:[function(require,module,exports){
 // from https://github.com/indutny/self-signed/blob/gh-pages/lib/asn1.js
 // Fedor, you are amazing.
 'use strict'
@@ -20990,7 +19387,7 @@ exports.signature = asn1.define('signature', function () {
   )
 })
 
-},{"./certificate":115,"asn1.js":4}],115:[function(require,module,exports){
+},{"./certificate":117,"asn1.js":2}],117:[function(require,module,exports){
 // from https://github.com/Rantanen/node-dtls/blob/25a7dc861bda38cfeac93a723500eea4f0ac2e86/Certificate.js
 // thanks to @Rantanen
 
@@ -21080,7 +19477,7 @@ var X509Certificate = asn.define('X509Certificate', function () {
 
 module.exports = X509Certificate
 
-},{"asn1.js":4}],116:[function(require,module,exports){
+},{"asn1.js":2}],118:[function(require,module,exports){
 (function (Buffer){
 // adapted from https://github.com/apatil/pemstrip
 var findProc = /Proc-Type: 4,ENCRYPTED\n\r?DEK-Info: AES-((?:128)|(?:192)|(?:256))-CBC,([0-9A-H]+)\n\r?\n\r?([0-9A-z\n\r\+\/\=]+)\n\r?/m
@@ -21114,7 +19511,7 @@ module.exports = function (okey, password) {
 }
 
 }).call(this,require("buffer").Buffer)
-},{"browserify-aes":25,"buffer":51,"evp_bytestokey":88}],117:[function(require,module,exports){
+},{"browserify-aes":27,"buffer":53,"evp_bytestokey":90}],119:[function(require,module,exports){
 (function (Buffer){
 var asn1 = require('./asn1')
 var aesid = require('./aesid.json')
@@ -21224,13 +19621,13 @@ function decrypt (data, password) {
 }
 
 }).call(this,require("buffer").Buffer)
-},{"./aesid.json":113,"./asn1":114,"./fixProc":116,"browserify-aes":25,"buffer":51,"pbkdf2":118}],118:[function(require,module,exports){
+},{"./aesid.json":115,"./asn1":116,"./fixProc":118,"browserify-aes":27,"buffer":53,"pbkdf2":120}],120:[function(require,module,exports){
 
 exports.pbkdf2 = require('./lib/async')
 
 exports.pbkdf2Sync = require('./lib/sync')
 
-},{"./lib/async":119,"./lib/sync":122}],119:[function(require,module,exports){
+},{"./lib/async":121,"./lib/sync":124}],121:[function(require,module,exports){
 (function (process,global){
 var checkParameters = require('./precondition')
 var defaultEncoding = require('./default-encoding')
@@ -21332,7 +19729,7 @@ module.exports = function (password, salt, iterations, keylen, digest, callback)
 }
 
 }).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"./default-encoding":120,"./precondition":121,"./sync":122,"_process":124,"safe-buffer":147}],120:[function(require,module,exports){
+},{"./default-encoding":122,"./precondition":123,"./sync":124,"_process":126,"safe-buffer":152}],122:[function(require,module,exports){
 (function (process){
 var defaultEncoding
 /* istanbul ignore next */
@@ -21346,7 +19743,7 @@ if (process.browser) {
 module.exports = defaultEncoding
 
 }).call(this,require('_process'))
-},{"_process":124}],121:[function(require,module,exports){
+},{"_process":126}],123:[function(require,module,exports){
 var MAX_ALLOC = Math.pow(2, 30) - 1 // default in iojs
 module.exports = function (iterations, keylen) {
   if (typeof iterations !== 'number') {
@@ -21366,7 +19763,7 @@ module.exports = function (iterations, keylen) {
   }
 }
 
-},{}],122:[function(require,module,exports){
+},{}],124:[function(require,module,exports){
 var md5 = require('create-hash/md5')
 var rmd160 = require('ripemd160')
 var sha = require('sha.js')
@@ -21469,7 +19866,7 @@ function pbkdf2 (password, salt, iterations, keylen, digest) {
 
 module.exports = pbkdf2
 
-},{"./default-encoding":120,"./precondition":121,"create-hash/md5":57,"ripemd160":146,"safe-buffer":147,"sha.js":149}],123:[function(require,module,exports){
+},{"./default-encoding":122,"./precondition":123,"create-hash/md5":59,"ripemd160":151,"safe-buffer":152,"sha.js":154}],125:[function(require,module,exports){
 (function (process){
 'use strict';
 
@@ -21516,7 +19913,7 @@ function nextTick(fn, arg1, arg2, arg3) {
 }
 
 }).call(this,require('_process'))
-},{"_process":124}],124:[function(require,module,exports){
+},{"_process":126}],126:[function(require,module,exports){
 // shim for using process in browser
 var process = module.exports = {};
 
@@ -21702,7 +20099,7 @@ process.chdir = function (dir) {
 };
 process.umask = function() { return 0; };
 
-},{}],125:[function(require,module,exports){
+},{}],127:[function(require,module,exports){
 exports.publicEncrypt = require('./publicEncrypt');
 exports.privateDecrypt = require('./privateDecrypt');
 
@@ -21713,7 +20110,7 @@ exports.privateEncrypt = function privateEncrypt(key, buf) {
 exports.publicDecrypt = function publicDecrypt(key, buf) {
   return exports.privateDecrypt(key, buf, true);
 };
-},{"./privateDecrypt":127,"./publicEncrypt":128}],126:[function(require,module,exports){
+},{"./privateDecrypt":129,"./publicEncrypt":130}],128:[function(require,module,exports){
 (function (Buffer){
 var createHash = require('create-hash');
 module.exports = function (seed, len) {
@@ -21732,7 +20129,7 @@ function i2ops(c) {
   return out;
 }
 }).call(this,require("buffer").Buffer)
-},{"buffer":51,"create-hash":55}],127:[function(require,module,exports){
+},{"buffer":53,"create-hash":57}],129:[function(require,module,exports){
 (function (Buffer){
 var parseKeys = require('parse-asn1');
 var mgf = require('./mgf');
@@ -21843,7 +20240,7 @@ function compare(a, b){
   return dif;
 }
 }).call(this,require("buffer").Buffer)
-},{"./mgf":126,"./withPublic":129,"./xor":130,"bn.js":20,"browserify-rsa":43,"buffer":51,"create-hash":55,"parse-asn1":117}],128:[function(require,module,exports){
+},{"./mgf":128,"./withPublic":131,"./xor":132,"bn.js":22,"browserify-rsa":45,"buffer":53,"create-hash":57,"parse-asn1":119}],130:[function(require,module,exports){
 (function (Buffer){
 var parseKeys = require('parse-asn1');
 var randomBytes = require('randombytes');
@@ -21941,7 +20338,7 @@ function nonZero(len, crypto) {
   return out;
 }
 }).call(this,require("buffer").Buffer)
-},{"./mgf":126,"./withPublic":129,"./xor":130,"bn.js":20,"browserify-rsa":43,"buffer":51,"create-hash":55,"parse-asn1":117,"randombytes":131}],129:[function(require,module,exports){
+},{"./mgf":128,"./withPublic":131,"./xor":132,"bn.js":22,"browserify-rsa":45,"buffer":53,"create-hash":57,"parse-asn1":119,"randombytes":136}],131:[function(require,module,exports){
 (function (Buffer){
 var bn = require('bn.js');
 function withPublic(paddedMsg, key) {
@@ -21954,7 +20351,7 @@ function withPublic(paddedMsg, key) {
 
 module.exports = withPublic;
 }).call(this,require("buffer").Buffer)
-},{"bn.js":20,"buffer":51}],130:[function(require,module,exports){
+},{"bn.js":22,"buffer":53}],132:[function(require,module,exports){
 module.exports = function xor(a, b) {
   var len = a.length;
   var i = -1;
@@ -21963,7 +20360,1777 @@ module.exports = function xor(a, b) {
   }
   return a
 };
-},{}],131:[function(require,module,exports){
+},{}],133:[function(require,module,exports){
+"use strict";
+
+var _typeof = typeof Symbol === "function" && typeof Symbol.iterator === "symbol" ? function (obj) { return typeof obj; } : function (obj) { return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; };
+
+var MAGIC_NUMBER = "5243"; // 0x52 0x43
+var VERSION_MAX = "01"; // 0x01
+var VERSION_MIN = "01"; // 0x01
+var VERSION_USING = "01"; // 0x01
+var EXTENSIONS = "0002"; // 0x00 0x02
+var RAI_TO_RAW = "000000000000000000000000";
+var MAIN_NET_WORK_THRESHOLD = "ffffffc000000000";
+
+var blockID = { invalid: 0, not_a_block: 1, send: 2, receive: 3, open: 4, change: 5 };
+
+module.exports = function () {
+  var api = {}; // public methods
+  var lowLevel = {}; // private methods
+  var data = ""; // raw block to be relayed to the network directly
+  var type; // block type
+  var hash; // block hash
+  var signed = false; // if block has signature
+  var worked = false; // if block has work
+  var signature = ""; // signature
+  var work = ""; // work
+  var blockAmount = bigInt(0); // amount transferred
+  var blockAccount; // account owner of this block
+  var origin; // account sending money in case of receive or open block
+  var immutable = false; // if true means block has already been confirmed and cannot be changed, some checks are ignored
+
+  var previous; // send, receive and change
+  var destination; // send
+  var balance; // send
+  var decBalance;
+  var source; // receive and open
+  var representative; // open and change
+  var account; // open
+
+  var version = 1; // to make updates compatible with previous versions of the wallet
+  var BLOCK_MAX_VERSION = 1;
+
+  /**
+   * Builds the block and calculates the hash
+   *
+   * @throws An exception on invalid type
+   * @returns {Array} The block hash
+   */
+  api.build = function () {
+
+    switch (type) {
+      case 'send':
+        data = "";
+        data += MAGIC_NUMBER + VERSION_MAX + VERSION_USING + VERSION_MIN + uint8_hex(blockID[type]) + EXTENSIONS;
+        data += previous;
+        data += destination;
+        data += balance;
+
+        var context = blake2bInit(32, null);
+        blake2bUpdate(context, hex_uint8(previous));
+        blake2bUpdate(context, hex_uint8(destination));
+        blake2bUpdate(context, hex_uint8(balance));
+        hash = uint8_hex(blake2bFinal(context));
+        break;
+
+      case 'receive':
+        data = "";
+        data += MAGIC_NUMBER + VERSION_MAX + VERSION_USING + VERSION_MIN + uint8_hex(blockID[type]) + EXTENSIONS;
+        data += previous;
+        data += source;
+
+        var context = blake2bInit(32, null);
+        blake2bUpdate(context, hex_uint8(previous));
+        blake2bUpdate(context, hex_uint8(source));
+        hash = uint8_hex(blake2bFinal(context));
+        break;
+
+      case 'open':
+        data = "";
+        data += MAGIC_NUMBER + VERSION_MAX + VERSION_USING + VERSION_MIN + uint8_hex(blockID[type]) + EXTENSIONS;
+        data += source;
+        data += representative;
+        data += account;
+
+        var context = blake2bInit(32, null);
+        blake2bUpdate(context, hex_uint8(source));
+        blake2bUpdate(context, hex_uint8(representative));
+        blake2bUpdate(context, hex_uint8(account));
+        hash = uint8_hex(blake2bFinal(context));
+        break;
+
+      case 'change':
+        data = "";
+        data += MAGIC_NUMBER + VERSION_MAX + VERSION_USING + VERSION_MIN + uint8_hex(blockID[type]) + EXTENSIONS;
+        data += previous;
+        data += representative;
+
+        var context = blake2bInit(32, null);
+        blake2bUpdate(context, hex_uint8(previous));
+        blake2bUpdate(context, hex_uint8(representative));
+        hash = uint8_hex(blake2bFinal(context));
+        break;
+
+      default:
+        throw "Block parameters need to be set first.";
+    }
+
+    return hash;
+  };
+
+  /**
+   * Sets the send parameters and builds the block
+   *
+   * @param {string} previousBlockHash - The previous block 32 byte hash hex encoded
+   * @param {string} destinationAccount - The XRB account receiving the money
+   * @param {string} balanceRemaining - Remaining balance after sending this block (Raw)
+   * @throws An exception on invalid block hash
+   * @throws An exception on invalid destination account
+   * @throws An exception on invalid balance
+   */
+  api.setSendParameters = function (previousBlockHash, destinationAccount, balanceRemaining) {
+    if (!/[0-9A-F]{64}/i.test(previousBlockHash)) throw "Invalid previous block hash.";
+
+    try {
+      var pk = keyFromAccount(destinationAccount);
+    } catch (err) {
+      throw "Invalid destination account.";
+    }
+
+    previous = previousBlockHash;
+    destination = pk;
+    decBalance = balanceRemaining;
+    balance = dec2hex(balanceRemaining, 16);
+    type = 'send';
+  };
+
+  /**
+   * Sets the receive parameters and builds the block
+   *
+   * @param {string} previousBlockHash - The previous block 32 byte hash hex encoded
+   * @param {string} sourceBlockHash - The hash of the send block which is going to be received, 32 byte hex encoded
+   * @throws An exception on invalid previousBlockHash
+   * @throws An exception on invalid sourceBlockHash
+   */
+  api.setReceiveParameters = function (previousBlockHash, sourceBlockHash) {
+    if (!/[0-9A-F]{64}/i.test(previousBlockHash)) throw "Invalid previous block hash.";
+    if (!/[0-9A-F]{64}/i.test(sourceBlockHash)) throw "Invalid source block hash.";
+
+    previous = previousBlockHash;
+    source = sourceBlockHash;
+    type = 'receive';
+  };
+
+  /**
+   * Sets the open parameters and builds the block
+   *
+   * @param {string} sourceBlockHash - The hash of the send block which is going to be received, 32 byte hex encoded
+   * @param {string} newAccount - The XRB account which is being created
+   * @param {string} representativeAccount - The account to be set as representative, if none, its self assigned
+   * @throws An exception on invalid sourceBlockHash
+   * @throws An exception on invalid account
+   * @throws An exception on invalid representative account
+   */
+  api.setOpenParameters = function (sourceBlockHash, newAccount) {
+    var representativeAccount = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : null;
+
+    if (!/[0-9A-F]{64}/i.test(sourceBlockHash)) throw "Invalid source block hash.";
+
+    try {
+      account = keyFromAccount(newAccount);
+    } catch (err) {
+      throw "Invalid XRB account.";
+    }
+
+    if (representativeAccount) {
+      try {
+        representative = keyFromAccount(representativeAccount);
+      } catch (err) {
+        throw "Invalid representative account.";
+      }
+    } else representative = account;
+
+    source = sourceBlockHash;
+    type = 'open';
+  };
+
+  /**
+   * Sets the change parameters and builds the block
+   *
+   * @param {string} previousBlockHash - The previous block 32 byte hash hex encoded
+   * @param {string} representativeAccount - The account to be set as representative
+   * @throws An exception on invalid previousBlockHash
+   * @throws An exception on invalid representative account
+   */
+  api.setChangeParameters = function (previousBlockHash, representativeAccount) {
+    if (!/[0-9A-F]{64}/i.test(previousBlockHash)) throw "Invalid previous block hash.";
+
+    try {
+      representative = keyFromAccount(representativeAccount);
+    } catch (err) {
+      throw "Invalid representative account.";
+    }
+
+    previous = previousBlockHash;
+    type = "change";
+  };
+
+  /**
+   * Sets the block signature
+   *
+   * @param {string} hex - The hex encoded 64 byte block hash signature
+   */
+  api.setSignature = function (hex) {
+    signature = hex;
+    signed = true;
+  };
+
+  /**
+   * Sets the block work
+   *
+   * @param {string} hex - The hex encoded 8 byte block hash PoW
+   * @throws An exception if work is not enough
+   */
+  api.setWork = function (hex) {
+    if (!api.checkWork(hex)) throw "Work not valid for block";
+    work = hex;
+    worked = true;
+  };
+
+  /**
+   * Sets block amount, to be retrieved from it directly instead of calculating it quering the chain
+   *
+   * @param {number} am - The amount
+   */
+  api.setAmount = function (am) {
+    blockAmount = bigInt(am);
+  };
+
+  /**
+   *
+   * @returns blockAmount - The amount transferred in raw
+   */
+  api.getAmount = function () {
+    return blockAmount;
+  };
+
+  /**
+   * Sets the account owner of the block
+   *
+   * @param {string} acc - The xrb account
+   */
+  api.setAccount = function (acc) {
+    blockAccount = acc;
+    if (type == 'send') origin = acc;
+  };
+
+  /**
+   *
+   * @returns blockAccount
+   */
+  api.getAccount = function () {
+    return blockAccount;
+  };
+
+  /**
+   * Sets the account which sent the block
+   * @param {string} acc - The xrb account
+   */
+  api.setOrigin = function (acc) {
+    if (type == 'receive' || type == 'open') origin = acc;
+  };
+
+  /**
+   *
+   * @returns originAccount
+   */
+  api.getOrigin = function () {
+    if (type == 'receive' || type == 'open') return origin;
+    if (type == 'send') return blockAccount;
+    return false;
+  };
+
+  /**
+   *
+   * @returns destinationAccount
+   */
+  api.getDestination = function () {
+    if (type == 'send') return accountFromHexKey(destination);
+    if (type == 'receive' || type == 'open') return blockAccount;
+  };
+
+  /**
+   *
+   * @param {boolean} hex - To get the hash hex encoded
+   * @returns {string} The block hash
+   */
+  api.getHash = function () {
+    var hex = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : false;
+
+    return hex ? hash : hex_uint8(hash);
+  };
+
+  api.getSignature = function () {
+    return signature;
+  };
+
+  api.getType = function () {
+    return type;
+  };
+
+  api.getBalance = function () {
+    var format = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : 'dec';
+
+    if (format == 'dec') {
+      var dec = bigInt(hex2dec(balance));
+      return dec;
+    }
+    return balance;
+  };
+
+  /**
+   * Returns the previous block hash if its not an open block, the public key if it is
+   *
+   * @returns {string} The previous block hash
+   */
+  api.getPrevious = function () {
+    if (type == 'open') return account;
+    return previous;
+  };
+
+  api.getSource = function () {
+    return source;
+  };
+
+  api.getRepresentative = function () {
+    if (type == 'change' || type == 'open') return accountFromHexKey(representative);else return false;
+  };
+
+  api.ready = function () {
+    return signed && worked;
+  };
+
+  api.setImmutable = function (bool) {
+    immutable = bool;
+  };
+
+  api.isImmutable = function () {
+    return immutable;
+  };
+
+  /**
+   * Changes the previous block hash and rebuilds the block
+   *
+   * @param {string} newPrevious - The previous block hash hex encoded
+   * @throws An exception if its an open block
+   * @throws An exception if block is not built
+   */
+  api.changePrevious = function (newPrevious) {
+    switch (type) {
+      case 'open':
+        throw 'Open has no previous block.';
+        break;
+      case 'receive':
+        api.setReceiveParameters(newPrevious, source);
+        api.build();
+        break;
+      case 'send':
+        api.setSendParameters(newPrevious, destination, stringFromHex(balance).replace(RAI_TO_RAW, ''));
+        api.build();
+        break;
+      case 'change':
+        api.setChangeParameters(newPrevious, representative);
+        api.build();
+        break;
+      default:
+        throw "Invalid block type";
+    }
+  };
+
+  /**
+   *
+   * @returns {string} The raw block hex encoded ready to be sent to the network
+   */
+  api.getRawBlock = function () {
+    if (!signed || !worked) throw "Incomplete block";
+    return data;
+  };
+
+  /**
+   *
+   * @returns {string} The block JSON encoded to be broadcasted with RPC
+   */
+  api.getJSONBlock = function () {
+    var pretty = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : false;
+
+    if (!signed) throw "Block lacks signature";
+    var obj = {};
+    obj.type = type;
+
+    switch (type) {
+      case 'send':
+        obj.previous = previous;
+        obj.destination = accountFromHexKey(destination);
+        obj.balance = balance;
+        break;
+
+      case 'receive':
+        obj.previous = previous;
+        obj.source = source;
+        break;
+
+      case 'open':
+        obj.source = source;
+        obj.representative = accountFromHexKey(representative ? representative : account);
+        obj.account = accountFromHexKey(account);
+        break;
+
+      case 'change':
+        obj.previous = previous;
+        obj.representative = accountFromHexKey(representative);
+        break;
+
+      default:
+        throw "Invalid block type.";
+    }
+
+    obj.work = work;
+    obj.signature = signature;
+
+    if (pretty) return JSON.stringify(obj, null, 2);
+    return JSON.stringify(obj);
+  };
+
+  api.getEntireJSON = function () {
+    var obj = JSON.parse(api.getJSONBlock());
+    var extras = {};
+
+    extras.blockAccount = blockAccount;
+    if (blockAmount) extras.blockAmount = blockAmount.toString();else extras.blockAmount = 0;
+    extras.origin = origin;
+    obj.extras = extras;
+    obj.version = version;
+    return JSON.stringify(obj);
+  };
+
+  api.buildFromJSON = function (json) {
+    var v = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : false;
+
+    if ((typeof json === "undefined" ? "undefined" : _typeof(json)) != 'object') var obj = JSON.parse(json);else var obj = json;
+
+    switch (obj.type) {
+      case 'send':
+        type = 'send';
+        previous = obj.previous;
+        destination = keyFromAccount(obj.destination);
+        balance = obj.balance;
+        break;
+
+      case 'receive':
+        type = 'receive';
+        previous = obj.previous;
+        source = obj.source;
+        break;
+
+      case 'open':
+        type = 'open';
+        source = obj.source;
+        representative = keyFromAccount(obj.representative);
+        account = keyFromAccount(obj.account);
+        break;
+
+      case 'change':
+        type = 'change';
+        previous = obj.previous;
+        representative = keyFromAccount(obj.representative);
+        break;
+
+      default:
+        throw "Invalid block type.";
+    }
+
+    signature = obj.signature;
+    work = obj.work;
+
+    if (work) worked = true;
+    if (signature) signed = true;
+
+    if (obj.extras !== undefined) {
+      api.setAccount(obj.extras.blockAccount);
+      api.setAmount(obj.extras.blockAmount ? obj.extras.blockAmount : 0);
+      api.setOrigin(obj.extras.origin);
+      if (api.getAmount().greater("1000000000000000000000000000000000000000000000000")) // too big, glitch from the units change a couple of commits ago :P
+        api.setAmount(api.getAmount().over("1000000000000000000000000"));
+    }
+
+    if (!v) version = obj.version ? obj.version : 0;else version = v;
+    if (version == 0) {
+      // update block data to new version and then update block version
+      if (type != 'change') {
+        if (blockAmount) {
+          api.setAmount(blockAmount.multiply("1000000000000000000000000")); // rai to raw
+        }
+      }
+      api.setVersion(1);
+    }
+
+    api.build();
+  };
+
+  api.checkWork = function (work) {
+    var blockHash = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : false;
+
+    if (blockHash === false) {
+      blockHash = api.getPrevious();
+    }
+
+    var t = hex_uint8(MAIN_NET_WORK_THRESHOLD);
+    var context = blake2bInit(8, null);
+    blake2bUpdate(context, hex_uint8(work).reverse());
+    blake2bUpdate(context, hex_uint8(blockHash));
+    var threshold = blake2bFinal(context).reverse();
+
+    if (threshold[0] == t[0]) if (threshold[1] == t[1]) if (threshold[2] == t[2]) if (threshold[3] >= t[3]) return true;
+    return false;
+  };
+
+  api.getVersion = function () {
+    return version;
+  };
+
+  api.setVersion = function (v) {
+    version = v;
+  };
+
+  api.getMaxVersion = function () {
+    return BLOCK_MAX_VERSION;
+  };
+
+  return api;
+};
+},{}],134:[function(require,module,exports){
+'use strict';
+
+var pbkdf2 = require('pbkdf2');
+var crypto = require('crypto');
+var assert = require('assert');
+var Block = require('./Block');
+var Buffer = require('buffer').Buffer;
+var blake = require('blakejs');
+
+var MAIN_NET_WORK_THRESHOLD = "ffffffc000000000";
+var SUPPORTED_ENCRYPTION_VERSION = 3;
+var SALT_BYTES = 16;
+var KEY_BIT_LEN = 256;
+var BLOCK_BIT_LEN = 128;
+
+var ALGO = {
+  SHA1: 'sha1',
+  SHA256: 'sha256'
+};
+
+var NoPadding = {
+  /*
+   *   Literally does nothing...
+   */
+
+  pad: function pad(dataBytes) {
+    return dataBytes;
+  },
+
+  unpad: function unpad(dataBytes) {
+    return dataBytes;
+  }
+};
+
+var ZeroPadding = {
+  /*
+   *   Fills remaining block space with 0x00 bytes
+   *   May cause issues if data ends with any 0x00 bytes
+   */
+
+  pad: function pad(dataBytes, nBytesPerBlock) {
+    var nPaddingBytes = nBytesPerBlock - dataBytes.length % nBytesPerBlock;
+    var zeroBytes = new Buffer(nPaddingBytes).fill(0x00);
+    return Buffer.concat([dataBytes, zeroBytes]);
+  },
+
+  unpad: function unpad(dataBytes) {
+    var unpaddedHex = dataBytes.toString('hex').replace(/(00)+$/, '');
+    return new Buffer(unpaddedHex, 'hex');
+  }
+};
+
+var Iso10126 = {
+  /*
+   *   Fills remaining block space with random byte values, except for the
+   *   final byte, which denotes the byte length of the padding
+   */
+
+  pad: function pad(dataBytes, nBytesPerBlock) {
+    var nPaddingBytes = nBytesPerBlock - dataBytes.length % nBytesPerBlock;
+    var paddingBytes = crypto.randomBytes(nPaddingBytes - 1);
+    var endByte = new Buffer([nPaddingBytes]);
+    return Buffer.concat([dataBytes, paddingBytes, endByte]);
+  },
+
+  unpad: function unpad(dataBytes) {
+    var nPaddingBytes = dataBytes[dataBytes.length - 1];
+    return dataBytes.slice(0, -nPaddingBytes);
+  }
+};
+
+var Iso97971 = {
+  /*
+   *   Fills remaining block space with 0x00 bytes following a 0x80 byte,
+   *   which serves as a mark for where the padding begins
+   */
+
+  pad: function pad(dataBytes, nBytesPerBlock) {
+    var withStartByte = Buffer.concat([dataBytes, new Buffer([0x80])]);
+    return ZeroPadding.pad(withStartByte, nBytesPerBlock);
+  },
+
+  unpad: function unpad(dataBytes) {
+    var zeroBytesRemoved = ZeroPadding.unpad(dataBytes);
+    return zeroBytesRemoved.slice(0, zeroBytesRemoved.length - 1);
+  }
+};
+
+var AES = {
+  CBC: 'aes-256-cbc',
+  OFB: 'aes-256-ofb',
+  ECB: 'aes-256-ecb',
+
+  /*
+   *   Encrypt / Decrypt with aes-256
+   *   - dataBytes, key, and salt are expected to be buffers
+   *   - default options are mode=CBC and padding=auto (PKCS7)
+   */
+
+  encrypt: function encrypt(dataBytes, key, salt, options) {
+    options = options || {};
+    assert(Buffer.isBuffer(dataBytes), 'expected `dataBytes` to be a Buffer');
+    assert(Buffer.isBuffer(key), 'expected `key` to be a Buffer');
+    assert(Buffer.isBuffer(salt) || salt === null, 'expected `salt` to be a Buffer or null');
+
+    var cipher = crypto.createCipheriv(options.mode || AES.CBC, key, salt || '');
+    cipher.setAutoPadding(!options.padding);
+
+    if (options.padding) dataBytes = options.padding.pad(dataBytes, BLOCK_BIT_LEN / 8);
+    var encryptedBytes = Buffer.concat([cipher.update(dataBytes), cipher.final()]);
+
+    return encryptedBytes;
+  },
+
+  decrypt: function decrypt(dataBytes, key, salt, options) {
+    options = options || {};
+    assert(Buffer.isBuffer(dataBytes), 'expected `dataBytes` to be a Buffer');
+    assert(Buffer.isBuffer(key), 'expected `key` to be a Buffer');
+    assert(Buffer.isBuffer(salt) || salt === null, 'expected `salt` to be a Buffer or null');
+
+    var decipher = crypto.createDecipheriv(options.mode || AES.CBC, key, salt || '');
+    decipher.setAutoPadding(!options.padding);
+
+    var decryptedBytes = Buffer.concat([decipher.update(dataBytes), decipher.final()]);
+    if (options.padding) decryptedBytes = options.padding.unpad(decryptedBytes);
+
+    return decryptedBytes;
+  }
+};
+
+module.exports = function (password) {
+  var api = {}; // wallet public methods
+  var _private = {}; // wallet private methods
+
+  var raiwalletdotcomRepresentative = "xrb_3pczxuorp48td8645bs3m6c3xotxd3idskrenmi65rbrga5zmkemzhwkaznh"; // self explaining
+
+  var pk; // current account public key
+  var sk; // current account secret key
+  var pendingBalance; // current account pending balance
+  var balance; // current account balance
+  var lastBlock = ""; // current account last block
+  var lastPendingBlock = "";
+  var pendingBlocks = []; // current account pending blocks
+  var chain = []; // current account chain
+  var representative; // current account representative
+  var minimumReceive = bigInt(1); // minimum amount to pocket
+
+  var keys = []; // wallet keys, accounts, and all necessary data
+  var recentTxs = [];
+  var walletPendingBlocks = []; // wallet pending blocks
+  var readyBlocks = []; // wallet blocks signed and worked, ready to broadcast and add to chain
+  var errorBlocks = []; // blocks which could not be confirmed
+
+  var remoteWork = []; // work pool
+  var autoWork = false; // generate work automatically on receive transactions (server)
+
+  var current = -1; // key being used
+  var seed = ""; // wallet seed
+  var lastKeyFromSeed = -1; // seed index
+  var passPhrase = password; // wallet password
+  var iterations = 5000; // pbkdf2 iterations
+  var checksum; // wallet checksum
+  var ciphered = true;
+
+  var logger = new Logger();
+
+  api.debug = function () {
+    console.log(readyBlocks);
+  };
+
+  api.debugChain = function () {
+    api.useAccount(keys[1].account);
+    for (var i in chain) {
+      console.log(chain[i].getHash(true));
+      console.log(chain[i].getPrevious());
+    }
+  };
+
+  api.setLogger = function (loggerObj) {
+    logger = loggerObj;
+  };
+
+  /**
+   * Sets the secret key to do all the signing stuff
+   *
+   * @param {Array} hex - The secret key byte array
+   * @throws An exception on invalid secret key length
+   */
+  _private.setSecretKey = function (bytes) {
+    if (bytes.length != 32) throw "Invalid Secret Key length. Should be 32 bytes.";
+
+    sk = bytes;
+    pk = nacl.sign.keyPair.fromSecretKey(sk).publicKey;
+  };
+
+  /**
+   * Signs a message with the secret key
+   *
+   * @param {Array} message - The message to be signed in a byte array
+   * @returns {Array} The 64 byte signature
+   */
+  api.sign = function (message) {
+    return nacl.sign.detached(message, sk);
+  };
+
+  api.changePass = function (pswd, newPass) {
+    if (ciphered) throw "Wallet needs to be decrypted first.";
+    if (pswd == passPhrase) {
+      passPhrase = newPass;
+      logger.log("Password changed");
+    } else throw "Incorrect password.";
+  };
+
+  api.setIterations = function (newIterationNumber) {
+    newIterationNumber = parseInt(newIterationNumber);
+    if (newIterationNumber < 2) throw "Minumum iteration number is 2.";
+
+    iterations = newIterationNumber;
+  };
+
+  api.setMinimumReceive = function (raw_amount) {
+    raw_amount = bigInt(raw_amount);
+    if (raw_amount.lesser(0)) return false;
+    minimumReceive = raw_amount;
+    return true;
+  };
+
+  api.getMinimumReceive = function () {
+    return minimumReceive;
+  };
+
+  /**
+   * Sets a seed for the wallet
+   *
+   * @param {string} hexSeed - The 32 byte seed hex encoded
+   * @throws An exception on malformed seed
+   */
+  api.setSeed = function (hexSeed) {
+    if (!/[0-9A-F]{64}/i.test(hexSeed)) throw "Invalid Hex Seed.";
+    seed = hex_uint8(hexSeed);
+  };
+
+  api.getSeed = function (pswd) {
+    if (pswd == passPhrase) return uint8_hex(seed);
+    throw "Incorrect password.";
+  };
+
+  /**
+   * Sets a random seed for the wallet
+   *
+   * @param {boolean} overwrite - Set to true to overwrite an existing seed
+   * @throws An exception on existing seed
+   */
+  api.setRandomSeed = function () {
+    var overwrite = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : false;
+
+    if (seed && !overwrite) throw "Seed already exists. To overwrite use setSeed or set overwrite to true";
+    seed = nacl.randomBytes(32);
+  };
+
+  /**
+   * Derives a new secret key from the seed and adds it to the wallet
+   *
+   * @throws An exception if theres no seed
+   */
+  api.newKeyFromSeed = function () {
+    if (seed.length != 32) throw "Seed should be set first.";
+
+    var index = lastKeyFromSeed + 1;
+    index = hex_uint8(dec2hex(index, 4));
+
+    var context = blake.blake2bInit(32);
+    blake.blake2bUpdate(context, seed);
+    blake.blake2bUpdate(context, index);
+
+    var newKey = blake.blake2bFinal(context);
+
+    lastKeyFromSeed++;
+
+    logger.log("New key generated");
+    api.addSecretKey(uint8_hex(newKey));
+
+    return accountFromHexKey(uint8_hex(nacl.sign.keyPair.fromSecretKey(newKey).publicKey));
+  };
+
+  /**
+   * Adds a key to the wallet
+   *
+   * @param {string} hex - The secret key hex encoded
+   * @throws An exception on invalid secret key length
+   * @throws An exception on invalid hex format
+   */
+  api.addSecretKey = function (hex) {
+    if (hex.length != 64) throw "Invalid Secret Key length. Should be 32 bytes.";
+
+    if (!/[0-9A-F]{64}/i.test(hex)) throw "Invalid Hex Secret Key.";
+
+    keys.push({
+      priv: hex_uint8(hex),
+      pub: nacl.sign.keyPair.fromSecretKey(hex_uint8(hex)).publicKey,
+      account: accountFromHexKey(uint8_hex(nacl.sign.keyPair.fromSecretKey(hex_uint8(hex)).publicKey)),
+      balance: bigInt(0),
+      pendingBalance: bigInt(0),
+      lastBlock: "",
+      lastPendingBlock: "",
+      subscribed: false,
+      chain: [],
+      representative: "",
+      label: ""
+    });
+    logger.log("New key added to wallet.");
+  };
+
+  /**
+   *
+   * @param {boolean} hex - To return the result hex encoded
+   * @returns {string} The public key hex encoded
+   * @returns {Array} The public key in a byte array
+   */
+  api.getPublicKey = function () {
+    var hex = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : false;
+
+    if (hex) return uint8_hex(pk);
+    return pk;
+  };
+
+  /**
+   * List all the accounts in the wallet
+   *
+   * @returns {Array}
+   */
+  api.getAccounts = function () {
+    var accounts = [];
+    for (var i in keys) {
+      accounts.push({
+        account: keys[i].account,
+        balance: bigInt(keys[i].balance),
+        pendingBalance: bigInt(keys[i].pendingBalance),
+        label: keys[i].label
+      });
+    }
+    return accounts;
+  };
+
+  /**
+   * Switches the account being used by the wallet
+   *
+   * @param {string} accountToUse
+   * @throws An exception if the account is not found in the wallet
+   */
+  api.useAccount = function (accountToUse) {
+    // save current account status
+    if (current != -1) {
+      keys[current].balance = balance;
+      keys[current].pendingBalance = pendingBalance;
+      keys[current].lastBlock = lastBlock;
+      keys[current].lastPendingBlock = lastPendingBlock;
+      keys[current].chain = chain;
+      keys[current].pendingBlocks = pendingBlocks;
+      keys[current].representative = representative;
+    }
+
+    for (var i in keys) {
+      if (keys[i].account == accountToUse) {
+        _private.setSecretKey(keys[i].priv);
+        balance = keys[i].balance;
+        pendingBalance = keys[i].pendingBalance;
+        current = i;
+        lastBlock = keys[i].lastBlock;
+        lastPendingBlock = keys[i].lastPendingBlock;
+        chain = keys[i].chain;
+        representative = keys[i].representative;
+        return;
+      }
+    }
+    throw "Account not found in wallet (" + accountToUse + ") " + JSON.stringify(api.getAccounts());
+  };
+
+  api.importChain = function (blocks, acc) {
+    api.useAccount(acc);
+    var last = chain.length > 0 ? chain[chain.length - 1].getHash(true) : uint8_hex(pk);
+    // verify chain
+    for (var i in blocks) {
+      if (blocks[i].getPrevious() != last) throw "Invalid chain";
+      if (!api.verifyBlock(blocks[i])) throw "There is an invalid block";
+    }
+  };
+
+  api.getLastNBlocks = function (acc, n) {
+    var offset = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : 0;
+
+    var temp = keys[current].account;
+    api.useAccount(acc);
+    var blocks = [];
+
+    if (n > chain.length) n = chain.length;
+
+    for (var i = chain.length - 1 - offset; i > chain.length - 1 - n - offset; i--) {
+      blocks.push(chain[i]);
+    }
+    api.useAccount(temp);
+    return blocks;
+  };
+
+  api.getBlocksUpTo = function (acc, hash) {
+    var temp = keys[current].account;
+    api.useAccount(acc);
+
+    var blocks = [];
+    for (var i = chain.length - 1; i > 0; i--) {
+      blocks.push(chain[i]);
+      if (chain[i].getHash(true) == hash) break;
+    }
+    return blocks;
+  };
+
+  api.getAccountBlockCount = function (acc) {
+    var temp = keys[current].account;
+    api.useAccount(acc);
+
+    var n = chain.length;
+    api.useAccount(temp);
+    return n;
+  };
+
+  /**
+   * Generates a block signature from the block hash using the secret key
+   *
+   * @param {string} blockHash - The block hash hex encoded
+   * @throws An exception on invalid block hash length
+   * @throws An exception on invalid block hash hex encoding
+   * @returns {string} The 64 byte hex encoded signature
+   */
+  api.signBlock = function (block) {
+    var blockHash = block.getHash();
+
+    if (blockHash.length != 32) throw "Invalid block hash length. It should be 32 bytes.";
+
+    block.setSignature(uint8_hex(api.sign(blockHash)));
+    block.setAccount(keys[current].account);
+
+    logger.log("Block " + block.getHash(true) + " signed.");
+  };
+
+  /**
+   * Verifies a block signature given its hash, sig and XRB account
+   *
+   * @param {string} blockHash - 32 byte hex encoded block hash
+   * @param {string} blockSignature - 64 byte hex encoded signature
+   * @param {string} account - A XRB account supposed to have signed the block
+   * @returns {boolean}
+   */
+  api.verifyBlockSignature = function (blockHash, blockSignature, account) {
+    var pubKey = hex_uint8(keyFromAccount(account));
+
+    return nacl.sign.detached.verify(hex_uint8(blockHash), hex_uint8(blockSignature), pubKey);
+  };
+
+  api.verifyBlock = function (block) {
+    var acc = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : "";
+
+    var account = block.getAccount() ? block.getAccount() : acc;
+    return api.verifyBlockSignature(block.getHash(true), block.getSignature(), block.getAccount());
+  };
+
+  /**
+   * Returns current account balance
+   *
+   * @returns {number} balance
+   */
+  api.getBalance = function () {
+    return balance ? balance : keys[current].balance;
+  };
+
+  /**
+   * Returns current account pending balance (not pocketed)
+   *
+   * @returns {number} pendingBalance
+   */
+  api.getPendingBalance = function () {
+    //return pendingBalance ? pendingBalance : keys[current].pendingBalance;
+    var am = bigInt(0);
+    for (var i in pendingBlocks) {
+      if (pendingBlocks[i].getType() == 'open' || pendingBlocks[i].getType() == 'receive') am = am.add(pendingBlocks[i].getAmount());
+    }
+    return am;
+  };
+
+  api.getRepresentative = function () {
+    var acc = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : false;
+
+    if (!acc) return representative;
+    api.useAccount(acc);
+    return representative;
+  };
+
+  _private.setRepresentative = function (repr) {
+    representative = repr;
+    keys[current].representative = repr;
+  };
+
+  /**
+   * Updates current account balance
+   *
+   * @param {number} newBalance - The new balance in rai units
+   */
+  _private.setBalance = function (newBalance) {
+    balance = bigInt(newBalance);
+    keys[current].balance = balance;
+  };
+
+  _private.setPendingBalance = function (newBalance) {
+    pendingBalance = bigInt(newBalance);
+    keys[current].pendingBalance = pendingBalance;
+  };
+
+  api.getAccountBalance = function (acc) {
+    api.useAccount(acc);
+    return api.getBalanceUpToBlock(0);
+  };
+
+  api.getWalletPendingBalance = function () {
+    var pending = bigInt(0);
+    for (var i in walletPendingBlocks) {
+      if (walletPendingBlocks[i].getType() == 'open' || walletPendingBlocks[i].getType() == 'receive') pending = pending.add(walletPendingBlocks[i].getAmount());
+    }
+    return pending;
+  };
+
+  api.getWalletBalance = function () {
+    var bal = bigInt(0);
+    var temp;
+    for (var i in keys) {
+      temp = keys[i].balance;
+      bal = bal.add(temp);
+    }
+    return bal;
+  };
+
+  api.recalculateWalletBalances = function () {
+    for (var i in keys) {
+      api.useAccount(keys[i].account);
+      _private.setBalance(api.getBalanceUpToBlock(0));
+    }
+  };
+
+  api.getBalanceUpToBlock = function (blockHash) {
+    if (chain.length <= 0) return 0;
+
+    var sum = bigInt(0);
+    var found = blockHash === 0 ? true : false;
+    var blk;
+
+    // check pending blocks first
+    for (var i = pendingBlocks.length - 1; i >= 0; i--) {
+      blk = pendingBlocks[i];
+
+      if (blk.getHash(true) == blockHash) found = true;
+
+      if (found) {
+        if (blk.getType() == 'open' || blk.getType() == 'receive') {
+          sum = sum.add(blk.getAmount());
+        } else if (blk.getType() == 'send') {
+          sum = sum.add(blk.getBalance());
+          break;
+        }
+      }
+    }
+
+    for (var _i = chain.length - 1; _i >= 0; _i--) {
+      blk = chain[_i];
+
+      if (blk.getHash(true) == blockHash) found = true;
+
+      if (found) {
+        if (blk.getType() == 'open' || blk.getType() == 'receive') {
+          sum = sum.add(blk.getAmount());
+        } else if (blk.getType() == 'send') {
+          sum = sum.add(blk.getBalance());
+          break;
+        }
+      }
+    }
+    return sum;
+  };
+
+  /**
+   * Updates an account balance
+   *
+   * @param {number} - The new balance in raw units
+   * @param {string} Account - The account whose balance is being updated
+   */
+  _private.setAccountBalance = function (newBalance, acc) {
+    var temp = current;
+    api.useAccount(acc);
+    _private.setBalance(newBalance);
+    api.useAccount(keys[temp].account);
+  };
+
+  _private.sumAccountPending = function (acc, amount) {
+    var temp = current;
+    api.useAccount(acc);
+    _private.setPendingBalance(api.getPendingBalance().sum(amount));
+    api.useAccount(keys[temp].account);
+  };
+
+  api.setLabel = function (acc, label) {
+    for (var i in keys) {
+      if (keys[i].account == acc) {
+        keys[i].label = label;
+        return true;
+      }
+    }
+    return false;
+  };
+
+  api.removePendingBlocks = function () {
+    pendingBlocks = [];
+  };
+
+  api.removePendingBlock = function (blockHash) {
+    var found = false;
+    for (var i in pendingBlocks) {
+      var tmp = pendingBlocks[i];
+      if (tmp.getHash(true) == blockHash) {
+        pendingBlocks.splice(i, 1);
+        found = true;
+      }
+    }
+    if (!found) {
+      console.log("Not found");
+      return;
+    }
+    for (var _i2 in walletPendingBlocks) {
+      var _tmp = walletPendingBlocks[_i2];
+      if (_tmp.getHash(true) == blockHash) {
+        walletPendingBlocks.splice(_i2, 1);
+        return;
+      }
+    }
+  };
+
+  api.getBlockFromHash = function (blockHash) {
+    var acc = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : 0;
+
+    var found = false;
+    var i = 0;
+    if (acc !== 0) api.useAccount(acc);else api.useAccount(keys[0].account);
+
+    for (var _i3 = 0; _i3 < keys.length; _i3++) {
+      api.useAccount(keys[_i3].account);
+      for (var j = chain.length - 1; j >= 0; j--) {
+        var blk = chain[j];
+        if (blk.getHash(true) == blockHash) return blk;
+      }
+      if (_i3 == keys.length - 1) break;
+      api.useAccount(keys[_i3 + 1].account);
+    }
+    return false;
+  };
+
+  api.addBlockToReadyBlocks = function (blk) {
+    readyBlocks.push(blk);
+    logger.log("Block ready to be broadcasted: " + blk.getHash(true));
+  };
+
+  api.addPendingSendBlock = function (from, to) {
+    var amount = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : 0;
+
+    api.useAccount(from);
+    amount = bigInt(amount);
+
+    var bal = api.getBalanceUpToBlock(0);
+    var remaining = bal.minus(amount);
+    var blk = new Block();
+
+    blk.setSendParameters(lastPendingBlock, to, remaining);
+    blk.build();
+    api.signBlock(blk);
+    blk.setAmount(amount);
+    blk.setAccount(from);
+
+    lastPendingBlock = blk.getHash(true);
+    keys[current].lastPendingBlock = lastPendingBlock;
+    _private.setBalance(remaining);
+    pendingBlocks.push(blk);
+    walletPendingBlocks.push(blk);
+    _private.save();
+
+    // check if we have received work already
+    var worked = false;
+    for (var i in remoteWork) {
+      if (remoteWork[i].hash == blk.getPrevious()) {
+        if (remoteWork[i].worked) {
+          worked = api.updateWorkPool(blk.getPrevious(), remoteWork[i].work);
+          break;
+        }
+      }
+    }
+    if (!worked) api.workPoolAdd(blk.getPrevious(), from, true);
+    api.workPoolAdd(blk.getHash(true), from);
+
+    logger.log("New send block waiting for work: " + blk.getHash(true));
+
+    return blk;
+  };
+
+  api.addPendingReceiveBlock = function (sourceBlockHash, acc, from) {
+    var amount = arguments.length > 3 && arguments[3] !== undefined ? arguments[3] : 0;
+
+    amount = bigInt(amount);
+    api.useAccount(acc);
+    if (amount.lesser(minimumReceive)) {
+      logger.log("Receive block rejected due to minimum receive amount (" + sourceBlockHash + ")");
+      return false;
+    }
+
+    // make sure this source has not been redeemed yet
+    for (var i in walletPendingBlocks) {
+      if (walletPendingBlocks[i].getSource() == sourceBlockHash) return false;
+    }
+
+    for (var _i4 in readyBlocks) {
+      if (readyBlocks[_i4].getSource() == sourceBlockHash) return false;
+    }
+
+    for (var _i5 in chain) {
+      if (chain[_i5].getSource() == sourceBlockHash) return false;
+    }
+
+    var blk = new Block();
+    if (lastPendingBlock.length == 64) blk.setReceiveParameters(lastPendingBlock, sourceBlockHash);else blk.setOpenParameters(sourceBlockHash, acc, raiwalletdotcomRepresentative);
+
+    blk.build();
+    api.signBlock(blk);
+    blk.setAmount(amount);
+    blk.setAccount(acc);
+    blk.setOrigin(from);
+
+    lastPendingBlock = blk.getHash(true);
+    keys[current].lastPendingBlock = lastPendingBlock;
+    pendingBlocks.push(blk);
+    walletPendingBlocks.push(blk);
+    _private.setPendingBalance(api.getPendingBalance().add(amount));
+    _private.save();
+
+    // check if we have received work already
+    var worked = false;
+    for (var _i6 in remoteWork) {
+      if (remoteWork[_i6].hash == blk.getPrevious()) {
+        if (remoteWork[_i6].worked) {
+          worked = api.updateWorkPool(blk.getPrevious(), remoteWork[_i6].work);
+          break;
+        }
+      }
+    }
+    if (!worked) api.workPoolAdd(blk.getPrevious(), acc, true);
+    api.workPoolAdd(blk.getHash(true), acc);
+
+    logger.log("New receive block waiting for work: " + blk.getHash(true));
+
+    return blk;
+  };
+
+  api.addPendingChangeBlock = function (acc, repr) {
+    api.useAccount(acc);
+
+    if (!lastPendingBlock) throw "There needs to be at least 1 block in the chain.";
+
+    var blk = new Block();
+    blk.setChangeParameters(lastPendingBlock, repr);
+    blk.build();
+    api.signBlock(blk);
+    blk.setAccount(acc);
+
+    lastPendingBlock = blk.getHash(true);
+    keys[current].lastPendingBlock = lastPendingBlock;
+    pendingBlocks.push(blk);
+    walletPendingBlocks.push(blk);
+    _private.save();
+
+    // check if we have received work already
+    var worked = false;
+    for (var i in remoteWork) {
+      if (remoteWork[i].hash == blk.getPrevious()) {
+        if (remoteWork[i].worked) {
+          worked = api.updateWorkPool(blk.getPrevious(), remoteWork[i].work);
+          break;
+        }
+      }
+    }
+    if (!worked) api.workPoolAdd(blk.getPrevious(), acc, true);
+    api.workPoolAdd(blk.getHash(true), acc);
+
+    logger.log("New change block waiting for work: " + blk.getHash(true));
+
+    return blk;
+  };
+
+  api.getPendingBlocks = function () {
+    return pendingBlocks;
+  };
+
+  api.getPendingBlockByHash = function (blockHash) {
+    for (var i in walletPendingBlocks) {
+      if (walletPendingBlocks[i].getHash(true) == blockHash) return walletPendingBlocks[i];
+    }
+    return false;
+  };
+
+  api.getNextWorkBlockHash = function (acc) {
+    var aux = current;
+    api.useAccount(acc);
+
+    if (lastBlock.length > 0) return lastBlock;else return uint8_hex(pk);
+    api.useAccount(keys[current].account);
+  };
+
+  _private.setLastBlockHash = function (blockHash) {
+    lastBlock = blockHash;
+    keys[current].lastBlock = blockHash;
+  };
+
+  api.workPoolAdd = function (hash, acc) {
+    var needed = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : false;
+    var work = arguments.length > 3 && arguments[3] !== undefined ? arguments[3] : false;
+
+    for (var i in remoteWork) {
+      if (remoteWork[i].hash == hash) return;
+    }if (work !== false) {
+      remoteWork.push({ hash: hash, worked: true, work: work, requested: true, needed: needed, account: acc });
+    } else {
+      remoteWork.push({ hash: hash, work: "", worked: false, requested: false, needed: needed, account: acc });
+      logger.log("New work target: " + hash);
+    }
+  };
+
+  api.getWorkPool = function () {
+    return remoteWork;
+  };
+
+  api.setWorkRequested = function (hash) {
+    for (var i in remoteWork) {
+      if (remoteWork[i].hash == hash) {
+        remoteWork[i].requested = true;
+        break;
+      }
+    }
+  };
+
+  api.setWorkNeeded = function (hash) {
+    for (var i in remoteWork) {
+      if (remoteWork[i].hash == hash) {
+        remoteWork[i].needed = true;
+        break;
+      }
+    }
+  };
+
+  api.checkWork = function (hash, work) {
+    var t = hex_uint8(MAIN_NET_WORK_THRESHOLD);
+    var context = blake.blake2bInit(8, null);
+    blake.blake2bUpdate(context, hex_uint8(work).reverse());
+    blake.blake2bUpdate(context, hex_uint8(hash));
+    var threshold = blake.blake2bFinal(context).reverse();
+
+    if (threshold[0] == t[0]) if (threshold[1] == t[1]) if (threshold[2] == t[2]) if (threshold[3] >= t[3]) return true;
+    return false;
+  };
+
+  api.updateWorkPool = function (hash, work) {
+    var found = false;
+    if (!api.checkWork(work, hash)) {
+      logger.warn("Invalid PoW received (" + work + ") (" + hash + ").");
+      return false;
+    }
+
+    for (var i in remoteWork) {
+      if (remoteWork[i].hash == hash) {
+        remoteWork[i].work = work;
+        remoteWork[i].worked = true;
+        remoteWork[i].requested = true;
+        remoteWork[i].needed = false;
+
+        found = true;
+        for (var j in walletPendingBlocks) {
+          if (walletPendingBlocks[j].getPrevious() == hash) {
+            logger.log("Work received for block " + walletPendingBlocks[j].getHash(true) + " previous: " + hash);
+            walletPendingBlocks[j].setWork(work);
+            var aux = walletPendingBlocks[j];
+            try {
+              api.confirmBlock(aux.getHash(true));
+              remoteWork.splice(i, 1);
+              api.setWorkNeeded(aux.getHash(true));
+              return true;
+            } catch (e) {
+              logger.error("Error adding block " + aux.getHash(true) + " to chain: " + e.message);
+              errorBlocks.push(aux);
+            }
+            break;
+          }
+        }
+        break;
+      }
+    }
+
+    if (!found) {
+      logger.warn("Work received for missing target: " + hash);
+      // add to work pool just in case, it may be a cached from the last block
+      api.workPoolAdd(hash, "", false, work);
+    }
+    return false;
+  };
+
+  api.checkWork = function (work, blockHash) {
+    var t = hex_uint8(MAIN_NET_WORK_THRESHOLD);
+    var context = blake.blake2bInit(8, null);
+    blake.blake2bUpdate(context, hex_uint8(work).reverse());
+    blake.blake2bUpdate(context, hex_uint8(blockHash));
+    var threshold = blake.blake2bFinal(context).reverse();
+
+    if (threshold[0] == t[0]) if (threshold[1] == t[1]) if (threshold[2] == t[2]) if (threshold[3] >= t[3]) return true;
+    return false;
+  };
+
+  api.waitingRemoteWork = function () {
+    for (var i in remoteWork) {
+      if (!remoteWork[i].worked) return true;
+    }
+    return false;
+  };
+
+  api.getReadyBlocks = function () {
+    return readyBlocks;
+  };
+
+  api.getNextReadyBlock = function () {
+    if (readyBlocks.length > 0) return readyBlocks[0];else return false;
+  };
+
+  api.getReadyBlockByHash = function (blockHash) {
+    for (var i in pendingBlocks) {
+      if (readyBlocks[i].getHash(true) == blockHash) {
+        return readyBlocks[i];
+      }
+    }
+    return false;
+  };
+
+  api.removeReadyBlock = function (blockHash) {
+    for (var i in readyBlocks) {
+      if (readyBlocks[i].getHash(true) == blockHash) {
+        var blk = readyBlocks[i];
+        readyBlocks.splice(i, 1);
+        return blk;
+      }
+    }
+    return false;
+  };
+
+  /**
+   * Adds block to account chain
+   *
+   * @param {string} - blockHash The block hash
+   * @throws An exception if the block is not found in the ready blocks array
+   * @throws An exception if the previous block does not match the last chain block
+   * @throws An exception if the chain is empty and the block is not of type open
+   */
+  api.confirmBlock = function (blockHash) {
+    var blk = api.getPendingBlockByHash(blockHash);
+    if (blk) {
+      if (blk.ready()) {
+        api.useAccount(blk.getAccount());
+        if (chain.length == 0) {
+          // open block
+          if (blk.getType() != 'open') throw "First block needs to be 'open'.";
+          chain.push(blk);
+          readyBlocks.push(blk);
+          api.removePendingBlock(blockHash);
+          _private.setPendingBalance(api.getPendingBalance().minus(blk.getAmount()));
+          _private.setBalance(api.getBalance().add(blk.getAmount()));
+          _private.save();
+        } else {
+          if (blk.getPrevious() == chain[chain.length - 1].getHash(true)) {
+            if (blk.getType() == 'receive') {
+              _private.setPendingBalance(api.getPendingBalance().minus(blk.getAmount()));
+              _private.setBalance(api.getBalance().add(blk.getAmount()));
+            } else if (blk.getType() == 'send') {
+              // check if amount sent matches amount actually being sent
+              var real = api.getBalanceUpToBlock(blk.getPrevious());
+              if (blk.isImmutable()) {
+                blk.setAmount(real.minus(blk.getBalance('dec')));
+              } else if (real.minus(blk.getBalance('dec')).neq(blk.getAmount())) {
+                logger.error('Sending incorrect amount (' + blk.getAmount().toString() + ') (' + real.minus(blk.getBalance('dec')).toString() + ')');
+                api.recalculateWalletBalances();
+                throw "Incorrect send amount.";
+              }
+            } else if (blk.getType() == 'change') {
+              // TODO
+              _private.setRepresentative(blk.getRepresentative());
+            } else throw "Invalid block type";
+            chain.push(blk);
+            readyBlocks.push(blk);
+            api.removePendingBlock(blockHash);
+            api.recalculateWalletBalances();
+            _private.save();
+          } else {
+            console.log(blk.getPrevious() + " " + chain[chain.length - 1].getHash(true));
+            logger.warn("Previous block does not match actual previous block");
+            throw "Previous block does not match actual previous block";
+          }
+        }
+        logger.log("Block added to chain: " + blk.getHash(true));
+      } else {
+        logger.error("Trying to confirm block without signature or work.");
+        throw "Block lacks signature or work.";
+      }
+    } else {
+      logger.warn("Block trying to be confirmed has not been found.");
+      throw 'Block not found';
+    }
+  };
+
+  api.importBlock = function (blk, acc) {
+    api.useAccount(acc);
+    blk.setAccount(acc);
+    if (!blk.ready()) throw "Block should be complete.";
+
+    lastPendingBlock = blk.getHash(true);
+    keys[current].lastPendingBlock = blk.getHash(true);
+
+    // check if there is a conflicting block pending
+    for (var i in pendingBlocks) {
+      if (pendingBlocks[i].getPrevious() == blk.getPrevious()) {
+        // conflict
+        _private.fixPreviousChange(blk.getPrevious(), blk.getHash(true), acc);
+      }
+    }
+
+    pendingBlocks.push(blk);
+    walletPendingBlocks.push(blk);
+    _private.save();
+    api.confirmBlock(blk.getHash(true));
+  };
+
+  api.importForkedBlock = function (blk, acc) {
+    api.useAccount(acc);
+    var prev = blk.getPrevious();
+
+    for (var i = chain.length - 1; i >= 0; i--) {
+      if (chain[i].getPrevious() == prev) {
+        // fork found, delete block and its successors
+        chain.splice(i, chain.length);
+
+        // delete pending blocks if any
+        pendingBlocks = [];
+
+        // import new block
+        api.importBlock(blk, acc);
+        return true;
+      }
+    }
+    return false;
+  };
+
+  _private.fixPreviousChange = function (oldPrevious, newPrevious, acc) {
+    api.useAccount(acc);
+    for (var i in pendingBlocks) {
+      if (pendingBlocks[i].getPrevious() == oldPrevious) {
+        var oldHash = pendingBlocks[i].getHash(true);
+        pendingBlocks[i].changePrevious(newPrevious);
+        var newHash = pendingBlocks[i].getHash(true);
+        lastPendingBlock = newHash;
+        _private.fixPreviousChange(oldHash, newHash, acc);
+      }
+    }
+  };
+
+  _private.save = function () {
+    // save current account status
+    keys[current].balance = balance;
+    keys[current].pendingBalance = pendingBalance;
+    keys[current].lastBlock = lastBlock;
+    keys[current].chain = chain;
+    keys[current].pendingBlocks = pendingBlocks;
+    keys[current].representative = representative;
+  };
+
+  /**
+   * Encrypts an packs the wallet data in a hex string
+   *
+   * @returns {string}
+   */
+  api.pack = function () {
+    var pack = {};
+    var tempKeys = [];
+    for (var i in keys) {
+      var aux = {};
+      aux.priv = uint8_hex(keys[i].priv);
+      aux.pub = uint8_hex(keys[i].pub);
+      aux.account = keys[i].account;
+      aux.balance = keys[i].balance.toString();
+      aux.pendingBalance = keys[i].pendingBalance.toString();
+      aux.lastBlock = keys[i].lastBlock;
+      aux.pendingBlocks = [];
+      aux.chain = [];
+      aux.representative = keys[i].representative;
+      aux.label = keys[i].label;
+
+      for (var j in keys[i].chain) {
+        aux.chain.push(keys[i].chain[j].getEntireJSON());
+      }
+      tempKeys.push(aux);
+    }
+    pack.readyBlocks = [];
+
+    for (var _i7 in readyBlocks) {
+      pack.readyBlocks.push(readyBlocks[_i7].getEntireJSON());
+    }
+    pack.keys = tempKeys;
+    pack.seed = uint8_hex(seed);
+    pack.last = lastKeyFromSeed;
+    pack.recent = recentTxs;
+    pack.remoteWork = remoteWork;
+    pack.autoWork = autoWork;
+    pack.minimumReceive = minimumReceive.toString();
+
+    pack = JSON.stringify(pack);
+    pack = stringToHex(pack);
+    pack = new Buffer(pack, 'hex');
+
+    var context = blake.blake2bInit(32);
+    blake.blake2bUpdate(context, pack);
+    checksum = blake.blake2bFinal(context);
+
+    var salt = new Buffer(nacl.randomBytes(16));
+    var key = pbkdf2.pbkdf2Sync(passPhrase, salt, iterations, 32, 'sha1');
+
+    var options = { mode: AES.CBC, padding: Iso10126 };
+    var encryptedBytes = AES.encrypt(pack, key, salt, options);
+
+    var payload = Buffer.concat([new Buffer(checksum), salt, encryptedBytes]);
+    return payload.toString('hex');
+  };
+
+  /**
+   * Constructs the wallet from an encrypted base64 encoded wallet
+   *
+   */
+  api.load = function (data) {
+    var bytes = new Buffer(data, 'hex');
+    checksum = bytes.slice(0, 32);
+    var salt = bytes.slice(32, 48);
+    var payload = bytes.slice(48);
+    var key = pbkdf2.pbkdf2Sync(passPhrase, salt, iterations, 32, 'sha1');
+
+    var options = {};
+    options.padding = options.padding || Iso10126;
+    var decryptedBytes = AES.decrypt(payload, key, salt, options);
+
+    var context = blake.blake2bInit(32);
+    blake.blake2bUpdate(context, decryptedBytes);
+    var hash = uint8_hex(blake.blake2bFinal(context));
+
+    if (hash != checksum.toString('hex').toUpperCase()) throw "Wallet is corrupted or has been tampered.";
+
+    var walletData = JSON.parse(decryptedBytes.toString('utf8'));
+
+    seed = hex_uint8(walletData.seed);
+    lastKeyFromSeed = walletData.last;
+    recentTxs = walletData.recent;
+    remoteWork = [];
+    autoWork = walletData.autoWork;
+    readyBlocks = [];
+    minimumReceive = walletData.minimumReceive != undefined ? bigInt(walletData.minimumReceive) : bigInt("1000000000000000000000000");
+
+    for (var i in walletData.readyBlocks) {
+      var blk = new Block();
+      blk.buildFromJSON(walletData.readyBlocks[i]);
+      readyBlocks.push(blk);
+    }
+
+    for (var _i8 in walletData.keys) {
+      var aux = {};
+
+      aux.chain = [];
+      for (var j in walletData.keys[_i8].chain) {
+        var _blk = new Block();
+        _blk.buildFromJSON(walletData.keys[_i8].chain[j]);
+        aux.chain.push(_blk);
+      }
+
+      aux.priv = hex_uint8(walletData.keys[_i8].priv);
+      aux.pub = hex_uint8(walletData.keys[_i8].pub);
+      aux.account = walletData.keys[_i8].account;
+      aux.balance = bigInt(walletData.keys[_i8].balance ? walletData.keys[_i8].balance : 0);
+      aux.lastBlock = aux.chain.length > 0 ? aux.chain[aux.chain.length - 1].getHash(true) : "";
+      aux.lastPendingBlock = aux.lastBlock;
+      aux.pendingBalance = bigInt(walletData.keys[_i8].pendingBalance ? walletData.keys[_i8].pendingBalance : 0);
+      aux.pendingBlocks = [];
+      aux.representative = walletData.keys[_i8].representative != undefined ? walletData.keys[_i8].representative : aux.account;
+      aux.label = walletData.keys[_i8].label != undefined ? walletData.keys[_i8].label : "";
+
+      keys.push(aux);
+      if (lastPendingBlock.length == 64) api.workPoolAdd(lastPendingBlock, aux.account, true);
+    }
+    api.useAccount(keys[0].account);
+    api.recalculateWalletBalances();
+    ciphered = false;
+    return walletData;
+  };
+
+  api.createWallet = function () {
+    var setSeed = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : false;
+
+    if (!setSeed) seed = nacl.randomBytes(32);else api.setSeed(setSeed);
+    api.newKeyFromSeed();
+    api.useAccount(keys[0].account);
+    return uint8_hex(seed);
+  };
+
+  return api;
+};
+},{"./Block":133,"assert":16,"blakejs":20,"buffer":53,"crypto":62,"pbkdf2":120}],135:[function(require,module,exports){
+'use strict';
+
+module.exports = {
+  Wallet: require('./Wallet'),
+  Block: require('./Block')
+};
+},{"./Block":133,"./Wallet":134}],136:[function(require,module,exports){
 (function (process,global){
 'use strict'
 
@@ -22005,7 +22172,7 @@ function randomBytes (size, cb) {
 }
 
 }).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"_process":124,"safe-buffer":147}],132:[function(require,module,exports){
+},{"_process":126,"safe-buffer":152}],137:[function(require,module,exports){
 (function (process,global){
 'use strict'
 
@@ -22117,10 +22284,10 @@ function randomFillSync (buf, offset, size) {
 }
 
 }).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"_process":124,"randombytes":131,"safe-buffer":147}],133:[function(require,module,exports){
+},{"_process":126,"randombytes":136,"safe-buffer":152}],138:[function(require,module,exports){
 module.exports = require('./lib/_stream_duplex.js');
 
-},{"./lib/_stream_duplex.js":134}],134:[function(require,module,exports){
+},{"./lib/_stream_duplex.js":139}],139:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -22245,7 +22412,7 @@ function forEach(xs, f) {
     f(xs[i], i);
   }
 }
-},{"./_stream_readable":136,"./_stream_writable":138,"core-util-is":53,"inherits":105,"process-nextick-args":123}],135:[function(require,module,exports){
+},{"./_stream_readable":141,"./_stream_writable":143,"core-util-is":55,"inherits":107,"process-nextick-args":125}],140:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -22293,7 +22460,7 @@ function PassThrough(options) {
 PassThrough.prototype._transform = function (chunk, encoding, cb) {
   cb(null, chunk);
 };
-},{"./_stream_transform":137,"core-util-is":53,"inherits":105}],136:[function(require,module,exports){
+},{"./_stream_transform":142,"core-util-is":55,"inherits":107}],141:[function(require,module,exports){
 (function (process,global){
 // Copyright Joyent, Inc. and other Node contributors.
 //
@@ -23303,7 +23470,7 @@ function indexOf(xs, x) {
   return -1;
 }
 }).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"./_stream_duplex":134,"./internal/streams/BufferList":139,"./internal/streams/destroy":140,"./internal/streams/stream":141,"_process":124,"core-util-is":53,"events":87,"inherits":105,"isarray":107,"process-nextick-args":123,"safe-buffer":147,"string_decoder/":157,"util":22}],137:[function(require,module,exports){
+},{"./_stream_duplex":139,"./internal/streams/BufferList":144,"./internal/streams/destroy":145,"./internal/streams/stream":146,"_process":126,"core-util-is":55,"events":89,"inherits":107,"isarray":109,"process-nextick-args":125,"safe-buffer":152,"string_decoder/":162,"util":24}],142:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -23518,7 +23685,7 @@ function done(stream, er, data) {
 
   return stream.push(null);
 }
-},{"./_stream_duplex":134,"core-util-is":53,"inherits":105}],138:[function(require,module,exports){
+},{"./_stream_duplex":139,"core-util-is":55,"inherits":107}],143:[function(require,module,exports){
 (function (process,global){
 // Copyright Joyent, Inc. and other Node contributors.
 //
@@ -24185,7 +24352,7 @@ Writable.prototype._destroy = function (err, cb) {
   cb(err);
 };
 }).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"./_stream_duplex":134,"./internal/streams/destroy":140,"./internal/streams/stream":141,"_process":124,"core-util-is":53,"inherits":105,"process-nextick-args":123,"safe-buffer":147,"util-deprecate":158}],139:[function(require,module,exports){
+},{"./_stream_duplex":139,"./internal/streams/destroy":145,"./internal/streams/stream":146,"_process":126,"core-util-is":55,"inherits":107,"process-nextick-args":125,"safe-buffer":152,"util-deprecate":163}],144:[function(require,module,exports){
 'use strict';
 
 /*<replacement>*/
@@ -24260,7 +24427,7 @@ module.exports = function () {
 
   return BufferList;
 }();
-},{"safe-buffer":147}],140:[function(require,module,exports){
+},{"safe-buffer":152}],145:[function(require,module,exports){
 'use strict';
 
 /*<replacement>*/
@@ -24333,13 +24500,13 @@ module.exports = {
   destroy: destroy,
   undestroy: undestroy
 };
-},{"process-nextick-args":123}],141:[function(require,module,exports){
+},{"process-nextick-args":125}],146:[function(require,module,exports){
 module.exports = require('events').EventEmitter;
 
-},{"events":87}],142:[function(require,module,exports){
+},{"events":89}],147:[function(require,module,exports){
 module.exports = require('./readable').PassThrough
 
-},{"./readable":143}],143:[function(require,module,exports){
+},{"./readable":148}],148:[function(require,module,exports){
 exports = module.exports = require('./lib/_stream_readable.js');
 exports.Stream = exports;
 exports.Readable = exports;
@@ -24348,13 +24515,13 @@ exports.Duplex = require('./lib/_stream_duplex.js');
 exports.Transform = require('./lib/_stream_transform.js');
 exports.PassThrough = require('./lib/_stream_passthrough.js');
 
-},{"./lib/_stream_duplex.js":134,"./lib/_stream_passthrough.js":135,"./lib/_stream_readable.js":136,"./lib/_stream_transform.js":137,"./lib/_stream_writable.js":138}],144:[function(require,module,exports){
+},{"./lib/_stream_duplex.js":139,"./lib/_stream_passthrough.js":140,"./lib/_stream_readable.js":141,"./lib/_stream_transform.js":142,"./lib/_stream_writable.js":143}],149:[function(require,module,exports){
 module.exports = require('./readable').Transform
 
-},{"./readable":143}],145:[function(require,module,exports){
+},{"./readable":148}],150:[function(require,module,exports){
 module.exports = require('./lib/_stream_writable.js');
 
-},{"./lib/_stream_writable.js":138}],146:[function(require,module,exports){
+},{"./lib/_stream_writable.js":143}],151:[function(require,module,exports){
 (function (Buffer){
 'use strict'
 var inherits = require('inherits')
@@ -24649,7 +24816,7 @@ function fn5 (a, b, c, d, e, m, k, s) {
 module.exports = RIPEMD160
 
 }).call(this,require("buffer").Buffer)
-},{"buffer":51,"hash-base":89,"inherits":105}],147:[function(require,module,exports){
+},{"buffer":53,"hash-base":91,"inherits":107}],152:[function(require,module,exports){
 /* eslint-disable node/no-deprecated-api */
 var buffer = require('buffer')
 var Buffer = buffer.Buffer
@@ -24713,7 +24880,7 @@ SafeBuffer.allocUnsafeSlow = function (size) {
   return buffer.SlowBuffer(size)
 }
 
-},{"buffer":51}],148:[function(require,module,exports){
+},{"buffer":53}],153:[function(require,module,exports){
 var Buffer = require('safe-buffer').Buffer
 
 // prototype class for hash functions
@@ -24796,7 +24963,7 @@ Hash.prototype._update = function () {
 
 module.exports = Hash
 
-},{"safe-buffer":147}],149:[function(require,module,exports){
+},{"safe-buffer":152}],154:[function(require,module,exports){
 var exports = module.exports = function SHA (algorithm) {
   algorithm = algorithm.toLowerCase()
 
@@ -24813,7 +24980,7 @@ exports.sha256 = require('./sha256')
 exports.sha384 = require('./sha384')
 exports.sha512 = require('./sha512')
 
-},{"./sha":150,"./sha1":151,"./sha224":152,"./sha256":153,"./sha384":154,"./sha512":155}],150:[function(require,module,exports){
+},{"./sha":155,"./sha1":156,"./sha224":157,"./sha256":158,"./sha384":159,"./sha512":160}],155:[function(require,module,exports){
 /*
  * A JavaScript implementation of the Secure Hash Algorithm, SHA-0, as defined
  * in FIPS PUB 180-1
@@ -24909,7 +25076,7 @@ Sha.prototype._hash = function () {
 
 module.exports = Sha
 
-},{"./hash":148,"inherits":105,"safe-buffer":147}],151:[function(require,module,exports){
+},{"./hash":153,"inherits":107,"safe-buffer":152}],156:[function(require,module,exports){
 /*
  * A JavaScript implementation of the Secure Hash Algorithm, SHA-1, as defined
  * in FIPS PUB 180-1
@@ -25010,7 +25177,7 @@ Sha1.prototype._hash = function () {
 
 module.exports = Sha1
 
-},{"./hash":148,"inherits":105,"safe-buffer":147}],152:[function(require,module,exports){
+},{"./hash":153,"inherits":107,"safe-buffer":152}],157:[function(require,module,exports){
 /**
  * A JavaScript implementation of the Secure Hash Algorithm, SHA-256, as defined
  * in FIPS 180-2
@@ -25065,7 +25232,7 @@ Sha224.prototype._hash = function () {
 
 module.exports = Sha224
 
-},{"./hash":148,"./sha256":153,"inherits":105,"safe-buffer":147}],153:[function(require,module,exports){
+},{"./hash":153,"./sha256":158,"inherits":107,"safe-buffer":152}],158:[function(require,module,exports){
 /**
  * A JavaScript implementation of the Secure Hash Algorithm, SHA-256, as defined
  * in FIPS 180-2
@@ -25202,7 +25369,7 @@ Sha256.prototype._hash = function () {
 
 module.exports = Sha256
 
-},{"./hash":148,"inherits":105,"safe-buffer":147}],154:[function(require,module,exports){
+},{"./hash":153,"inherits":107,"safe-buffer":152}],159:[function(require,module,exports){
 var inherits = require('inherits')
 var SHA512 = require('./sha512')
 var Hash = require('./hash')
@@ -25261,7 +25428,7 @@ Sha384.prototype._hash = function () {
 
 module.exports = Sha384
 
-},{"./hash":148,"./sha512":155,"inherits":105,"safe-buffer":147}],155:[function(require,module,exports){
+},{"./hash":153,"./sha512":160,"inherits":107,"safe-buffer":152}],160:[function(require,module,exports){
 var inherits = require('inherits')
 var Hash = require('./hash')
 var Buffer = require('safe-buffer').Buffer
@@ -25523,7 +25690,7 @@ Sha512.prototype._hash = function () {
 
 module.exports = Sha512
 
-},{"./hash":148,"inherits":105,"safe-buffer":147}],156:[function(require,module,exports){
+},{"./hash":153,"inherits":107,"safe-buffer":152}],161:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -25652,7 +25819,7 @@ Stream.prototype.pipe = function(dest, options) {
   return dest;
 };
 
-},{"events":87,"inherits":105,"readable-stream/duplex.js":133,"readable-stream/passthrough.js":142,"readable-stream/readable.js":143,"readable-stream/transform.js":144,"readable-stream/writable.js":145}],157:[function(require,module,exports){
+},{"events":89,"inherits":107,"readable-stream/duplex.js":138,"readable-stream/passthrough.js":147,"readable-stream/readable.js":148,"readable-stream/transform.js":149,"readable-stream/writable.js":150}],162:[function(require,module,exports){
 'use strict';
 
 var Buffer = require('safe-buffer').Buffer;
@@ -25925,7 +26092,7 @@ function simpleWrite(buf) {
 function simpleEnd(buf) {
   return buf && buf.length ? this.write(buf) : '';
 }
-},{"safe-buffer":147}],158:[function(require,module,exports){
+},{"safe-buffer":152}],163:[function(require,module,exports){
 (function (global){
 
 /**
@@ -25996,16 +26163,16 @@ function config (name) {
 }
 
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{}],159:[function(require,module,exports){
-arguments[4][105][0].apply(exports,arguments)
-},{"dup":105}],160:[function(require,module,exports){
+},{}],164:[function(require,module,exports){
+arguments[4][107][0].apply(exports,arguments)
+},{"dup":107}],165:[function(require,module,exports){
 module.exports = function isBuffer(arg) {
   return arg && typeof arg === 'object'
     && typeof arg.copy === 'function'
     && typeof arg.fill === 'function'
     && typeof arg.readUInt8 === 'function';
 }
-},{}],161:[function(require,module,exports){
+},{}],166:[function(require,module,exports){
 (function (process,global){
 // Copyright Joyent, Inc. and other Node contributors.
 //
@@ -26595,7 +26762,7 @@ function hasOwnProperty(obj, prop) {
 }
 
 }).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"./support/isBuffer":160,"_process":124,"inherits":159}],162:[function(require,module,exports){
+},{"./support/isBuffer":165,"_process":126,"inherits":164}],167:[function(require,module,exports){
 var indexOf = require('indexof');
 
 var Object_keys = function (obj) {
@@ -26735,4 +26902,4 @@ exports.createContext = Script.createContext = function (context) {
     return copy;
 };
 
-},{"indexof":104}]},{},[3]);
+},{"indexof":106}]},{},[1]);
