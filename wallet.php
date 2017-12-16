@@ -210,6 +210,26 @@
                             </form>
                         </div>
                     </div>
+                    <div class="col-md-12 b-line">
+                        <div class="col-md-12">
+                            <h3>2 Factor Authentication</h3>
+                            <p>
+                                Increase you wallet security adding 2fa with google authenticator.
+                            </p>
+                            <form method="post">
+                                <div class="form-group" id="qr_2fa"></div>
+                                <div class="form-group" id="2fa_confirm" style="display:none">
+                                    <label for="2facode">Enter 2fa code to confirm the action</label>
+                                    <input type="text" name="2fa" id="2fa_confirm_input" class="form-control" placeholder="e.g.: 000000" />
+                                </div>
+                                <div class="form-group">
+                                    <button type="button" class="btn btn-primary" id="button_2fa">
+                                        Enable
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
                     <!--
                     <div class="col-md-12 b-line">
                         <div class="col-md-12">

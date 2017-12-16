@@ -12,6 +12,9 @@ var bottomReached = false;
 var loadingTxs = false;
 var lastAction = 0;
 var signOutInterval = 30;
+var _2fa_enabled = false;
+var _2fa_confirmed = false;
+var _2fa_qr_url = "";
 
 var RESOLVE_FORKS_BLOCK_BATCH_SIZE = 20;
 
@@ -743,6 +746,38 @@ $(document).ready(function(){
 		setTimeout(debugAllWallet, 3000);
 	}
 	
+	function load2faSettings()
+	{
+		if(_2fa_confirmed)
+		{
+			$('#2fa_confirm').fadeIn();
+			$('#button_2fa').html('Disable');
+			$('#qr_2fa').html('');
+			$('#2fa_confirm_input').val('');
+			$('#button_2fa').addClass('btn-danger');
+			$('#button_2fa').removeClass('btn-primary');
+		}
+		else if(_2fa_enabled)
+		{
+			$('#2fa_confirm').fadeIn();
+			$('#button_2fa').html('Confirm');
+			$('#qr_2fa').html('<img src="'+_2fa_qr_url+'" class="img-responsive" />');
+			$('#2fa_confirm_input').val('');
+			$('#button_2fa').addClass('btn-primary');
+			$('#button_2fa').removeClass('btn-danger');
+		}
+		else
+		{
+			// disabled
+			$('#2fa_confirm').fadeOut();
+			$('#button_2fa').html('Enable');
+			$('#qr_2fa').html('');
+			$('#2fa_confirm_input').val('');
+			$('#button_2fa').addClass('btn-primary');
+			$('#button_2fa').removeClass('btn-danger');
+		}
+	}
+	
 	function goToWallet()
 	{
 		// stop live txs script
@@ -762,6 +797,7 @@ $(document).ready(function(){
 		$('#minimum_receive').val(wallet.getMinimumReceive().over("1000000000000000000000000"));
 
 		checkChains(function(){
+			load2faSettings();
 			refreshBalances();
 			getPendingBlocks2();
 			recheckWork();
@@ -838,37 +874,53 @@ $(document).ready(function(){
 	$('.form-login').submit(function(e){
 		e.preventDefault();
 		var wid = $('#wid').val();
+		var code = $('#2fa_login_code').val();
 		
 		$('input').prop('disabled', true);
-		$.post('ajax.php', 'action=login&wallet_id='+wid, function(data){
+		$.post('ajax.php', 'action=login&wallet_id='+wid+'&2fa='+code, function(data){
 			data = JSON.parse(data);
 			
 			if(data.status == 'success')
 			{
-				// decrypt wallet and check checksum
-				wallet = new RaiWallet($('#password').val());
-				wallet.setLogger(logger);
-				$('#password').val('');
-				
-				try{
-					wallet.load(data.wallet);
-				}catch(e){
-					alertError('Error decrypting wallet. Check that the password is correct.');
-					$('input').prop('disabled', 0);
-					console.log(e);
-					return;
-				}
-				
-				if(data.alias)
+				if(data._2fa)
 				{
-					$('#alias').val(data.alias);
-					$('#alias').prop('disabled', 1);
-					$('#change_alias').fadeOut();
+					$('#_2fa_input').fadeIn();
+					alertInfo("Enter google authenticator code.");
 				}
-				
-				signOutInterval = data.sign_out;
-				$('#aso_time').val(signOutInterval);
-				goToWallet();
+				else
+				{
+					// decrypt wallet and check checksum
+					wallet = new RaiWallet($('#password').val());
+					wallet.setLogger(logger);
+					$('#password').val('');
+					
+					try{
+						wallet.load(data.wallet);
+					}catch(e){
+						alertError('Error decrypting wallet. Check that the password is correct.');
+						$('input').prop('disabled', 0);
+						console.log(e);
+						return;
+					}
+					
+					if(data.alias)
+					{
+						$('#alias').val(data.alias);
+						$('#alias').prop('disabled', 1);
+						$('#change_alias').fadeOut();
+					}
+					
+					if(data._2fa_enabled)
+					{
+						_2fa_enabled = true;
+						_2fa_qr_url = data._2fa_qr_url;
+						_2fa_confirmed = data._2fa_confirmed;
+					}
+					
+					signOutInterval = data.sign_out;
+					$('#aso_time').val(signOutInterval);
+					goToWallet();
+				}
 			}
 			else
 			{
@@ -1237,6 +1289,68 @@ $(document).ready(function(){
 			alertError(e);
 		}
 		
+	});
+	
+	$('#button_2fa').click(function(){
+		if(!_2fa_enabled)
+		{
+			// enable
+			$('#button_2fa').prop('disabled', true);
+			$.post('ajax.php', 'action=enable2fa', function(data) {
+				data = JSON.parse(data);
+				if(data.status == 'success')
+				{
+					_2fa_enabled = true;
+					_2fa_confirmed = false;
+					_2fa_qr_url = data.qr_url;
+					load2faSettings();
+					alertInfo('Add this key to your google authenticator app and enter the code to confirm it.');
+				}
+				else
+					alertError(data.msg);
+				$('#button_2fa').prop('disabled', false);
+			});
+		}
+		else if(!_2fa_confirmed)
+		{
+			// confirm
+			$('#button_2fa').prop('disabled', true);
+			var code = $('#2fa_confirm_input').val();
+			$.post('ajax.php', 'action=confirm2fa&code='+code, function(data){
+				data = JSON.parse(data);
+				if(data.status == 'success')
+				{
+					_2fa_enabled = true;
+					_2fa_confirmed = true;
+					load2faSettings();
+					alertSuccess('2fa successfully enabled.');
+				}
+				else
+				{
+					alertError(data.msg);
+				}
+				$('#button_2fa').prop('disabled', false);
+			});
+		}
+		else
+		{
+			// disable
+			var code = $('#2fa_confirm_input').val();
+			$('#button_2fa').prop('disabled', true);
+			$.post('ajax.php', 'action=disable2fa&code='+code, function(data) {
+				data = JSON.parse(data);
+				if(data.status == 'success')
+				{
+					alertSuccess(data.msg);
+					_2fa_enabled = false;
+					_2fa_confirmed = false;
+					load2faSettings();
+				}
+				else
+					alertError(data.msg);
+				$('#button_2fa').prop('disabled', false);
+			});
+		}
 	});
 	
 	$('#change-iterations').click(function(){
