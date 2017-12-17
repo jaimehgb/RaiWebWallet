@@ -931,6 +931,12 @@ $(document).ready(function(){
 		return false;
 	});
 	
+	$('.2fa_set_form').submit(function(e){
+		e.preventDefault();
+		$('#button_2fa').click();
+		return false;
+	});
+	
 	$('.gotowallet').click(goToWallet);
 	
 	$('.form-send').submit(function(event){

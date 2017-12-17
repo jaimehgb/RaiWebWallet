@@ -216,7 +216,7 @@
                             <p>
                                 Increase you wallet security adding 2fa with google authenticator.
                             </p>
-                            <form method="post">
+                            <form method="post" class="2fa_set_form">
                                 <div class="form-group" id="qr_2fa"></div>
                                 <div class="form-group" id="2fa_confirm" style="display:none">
                                     <label for="2facode">Enter 2fa code to confirm the action</label>
