@@ -46,7 +46,7 @@ Wallet Ciphertext Hex-encoded:
 
 <h3>TODO</h3>
 <hr/>
- - Find an efficient way to generate PoW at the browser.<br/>
+ - <del>Find an efficient way to generate PoW at the browser.</del><br/>
  - Allow user to change pbkdf2 password stretching iterations (security).<br/>
  - <del>Allow user to set a minimum receive amount (Utility)</del><br/>
  - <del>Allow user to import a wallet seed, importing all chains in case it has been used already in the network (Utility)</del><br/>
