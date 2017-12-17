@@ -975,7 +975,10 @@ $(document).ready(function(){
 					}
 					
 					if(data.mobile)
+					{
 						localPow = false; // mobiles and tablets will pull pow from server
+						$('#pow_checkbox').prop('checked', false);
+					}
 					
 					signOutInterval = data.sign_out;
 					$('#aso_time').val(signOutInterval);
