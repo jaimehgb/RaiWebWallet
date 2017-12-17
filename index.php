@@ -496,6 +496,8 @@ session_start();
     <script type="text/javascript" src="functions.js"></script>
     <script type="text/javascript" src="js/bigInteger.min.js"></script>
     <script type="text/javascript" src="Logger.js"></script>
+    <script src="js/pow.js"></script>
+    <script src="js/startThreads.js"></script>
     <script src="main.js?v=1.0.2"></script>
 
 </body>

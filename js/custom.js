@@ -16,6 +16,9 @@ var _2fa_enabled = false;
 var _2fa_confirmed = false;
 var _2fa_qr_url = "";
 var _2fa_key = "";
+var localPow = true;
+var localPowWorking = false;
+var pow_workers;
 
 var RESOLVE_FORKS_BLOCK_BATCH_SIZE = 20;
 
@@ -301,10 +304,54 @@ $(document).ready(function(){
 		});
 	}
 	
+	function clientPoW()
+	{
+		localPowWorking = true;
+		if(!localPow)
+			return setTimeout(clientPoW, 1000);
+		
+		var pool = wallet.getWorkPool();
+		var hash = false;
+		if(pool.length > 0)
+		{
+			for(let i in pool)
+			{
+				if(pool[i].needed ||!pool[i].requested)
+				{
+					hash = pool[i].hash;
+					break;
+				}
+			}
+			
+			if(hash === false)
+				return setTimeout(clientPoW, 1000);
+			
+			pow_workers = pow_initiate(NaN, 'js/');
+			pow_callback(pow_workers, hash, function() {
+				logger.log('Working locally on ' + hash);
+			}, function(work) {
+				logger.log('PoW found for ' + hash + ": " + work);
+				wallet.updateWorkPool(hash, work);
+				setTimeout(clientPoW, 1000);
+			});
+		}
+		else
+		{
+			setTimeout(clientPoW, 1000);
+		}
+	}
+	
 	function recheckWork()
 	{
 		var pool = wallet.getWorkPool();
 		var batch = [];
+		
+		if(localPow)
+		{
+			if(!localPowWorking)
+				setTimeout(clientPoW, 1);
+			return setTimeout(recheckWork, 5000);
+		}
 		
 		for(let i in pool)
 		{
@@ -337,12 +384,17 @@ $(document).ready(function(){
 					{
 						window.location.href=data.location;
 					}
+					setTimeout(recheckWork, 5000);
 				});
 			}
 			else
+			{
 				remoteWork(batch[0]);
+				setTimeout(recheckWork, 5000);
+			}
 		}
-		setTimeout(recheckWork, 5000);
+		else
+			setTimeout(recheckWork, 5000);
 	}
 	
 	function broadcastBlock(blk)
@@ -922,6 +974,9 @@ $(document).ready(function(){
 						_2fa_key = data._2fa_key;
 					}
 					
+					if(data.mobile)
+						localPow = false; // mobiles and tablets will pull pow from server
+					
 					signOutInterval = data.sign_out;
 					$('#aso_time').val(signOutInterval);
 					goToWallet();
@@ -995,7 +1050,7 @@ $(document).ready(function(){
 				$(".modal").modal('hide');
 				alertInfo("Transaction built successfully. Waiting for work ...");
 				addRecentSendToGui({date: "Just now", amount: amountRaw, hash: hash});
-				remoteWork(blk.getPrevious());
+				wallet.workPoolAdd(blk.getPrevious(), from, true);
 			}catch(e){
 				alertError('Ooops, something happened: ' + e.message);
 			}
@@ -1362,6 +1417,23 @@ $(document).ready(function(){
 					alertError(data.msg);
 				$('#button_2fa').prop('disabled', false);
 			});
+		}
+	});
+	
+	$('#pow_checkbox').change(function(){
+		if($(this).is(":checked"))
+		{
+			localPow = true;
+			localPowWorking = true;
+			clientPoW();
+			alertInfo('Preferences updated. PoW will be generated at client side now.');
+		}
+		else
+		{
+			localPow = false;
+			pow_terminate(pow_workers);
+			localPowWorking = false;
+			alertInfo('Preferences updated. PoW will be generated at server side now.');
 		}
 	});
 	

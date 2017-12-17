@@ -119,6 +119,21 @@
                     </div>
                     <div class="col-md-12 b-line">
                         <div class="col-md-12">
+                            <h3>Generate PoW Locally</h3>
+                            <p>
+                                Uncheck this option if your computer takes a long time to generate PoW or if you are using a mobile device. 
+                                It's faster when using Mozilla Firefox.
+                            </p>
+                            <form method="post" class="form-pow">
+                                <div class="form-group">
+                                    <label>Local PoW</label>
+                                    <input type="checkbox" name="local_pow" id="pow_checkbox" checked />
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                    <div class="col-md-12 b-line">
+                        <div class="col-md-12">
                             <h3>Change Alias</h3>
                             <p>
                                 You can set an alias to login without having to copy the hex identifier every single time :P <br/>
