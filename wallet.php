@@ -218,6 +218,7 @@
                             </p>
                             <form method="post" class="2fa_set_form">
                                 <div class="form-group" id="qr_2fa"></div>
+                                <div class="form-group"><label id="2fa_key"></label></div>
                                 <div class="form-group" id="2fa_confirm" style="display:none">
                                     <label for="2facode">Enter 2fa code to confirm the action</label>
                                     <input type="text" name="2fa" id="2fa_confirm_input" class="form-control" placeholder="e.g.: 000000" />

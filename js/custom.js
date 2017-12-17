@@ -15,6 +15,7 @@ var signOutInterval = 30;
 var _2fa_enabled = false;
 var _2fa_confirmed = false;
 var _2fa_qr_url = "";
+var _2fa_key = "";
 
 var RESOLVE_FORKS_BLOCK_BATCH_SIZE = 20;
 
@@ -753,6 +754,7 @@ $(document).ready(function(){
 			$('#2fa_confirm').fadeIn();
 			$('#button_2fa').html('Disable');
 			$('#qr_2fa').html('');
+			$('#2fa_key').html('');
 			$('#2fa_confirm_input').val('');
 			$('#button_2fa').addClass('btn-danger');
 			$('#button_2fa').removeClass('btn-primary');
@@ -762,6 +764,7 @@ $(document).ready(function(){
 			$('#2fa_confirm').fadeIn();
 			$('#button_2fa').html('Confirm');
 			$('#qr_2fa').html('<img src="'+_2fa_qr_url+'" class="img-responsive" />');
+			$('#2fa_key').html("Key: "+_2fa_key);
 			$('#2fa_confirm_input').val('');
 			$('#button_2fa').addClass('btn-primary');
 			$('#button_2fa').removeClass('btn-danger');
@@ -772,6 +775,7 @@ $(document).ready(function(){
 			$('#2fa_confirm').fadeOut();
 			$('#button_2fa').html('Enable');
 			$('#qr_2fa').html('');
+			$('#2fa_key').html('');
 			$('#2fa_confirm_input').val('');
 			$('#button_2fa').addClass('btn-primary');
 			$('#button_2fa').removeClass('btn-danger');
@@ -1309,6 +1313,7 @@ $(document).ready(function(){
 					_2fa_enabled = true;
 					_2fa_confirmed = false;
 					_2fa_qr_url = data.qr_url;
+					_2fa_key = data._2fa_key;
 					load2faSettings();
 					alertInfo('Add this key to your google authenticator app and enter the code to confirm it.');
 				}
