@@ -919,6 +919,7 @@ $(document).ready(function(){
 						_2fa_enabled = true;
 						_2fa_qr_url = data._2fa_qr_url;
 						_2fa_confirmed = data._2fa_confirmed;
+						_2fa_key = data._2fa_key;
 					}
 					
 					signOutInterval = data.sign_out;
