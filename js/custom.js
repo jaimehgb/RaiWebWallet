@@ -974,11 +974,9 @@ $(document).ready(function(){
 						_2fa_key = data._2fa_key;
 					}
 					
-					if(data.mobile)
-					{
-						localPow = false; // mobiles and tablets will pull pow from server
-						$('#pow_checkbox').prop('checked', false);
-					}
+					// default to server side pow always 
+					localPow = false;
+					$('#pow_checkbox').prop('checked', false);
 					
 					signOutInterval = data.sign_out;
 					$('#aso_time').val(signOutInterval);
