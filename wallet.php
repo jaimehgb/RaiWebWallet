@@ -66,7 +66,7 @@
                         </div>
                         
                         <div class="col-md-6">
-                            <h3>Your accounts</h3>
+                            <h3>Your account(s)</h3>
                             <div class="accounts">
                                 <ul>
 
@@ -201,7 +201,7 @@
                         <div class="col-md-12">
                             <h3>Change Password</h3>
                             <p>
-                                You can change you wallet password here. Just make sure you don't forget it! 
+                                You can change your wallet password here. Just make sure you don't forget it! 
                             </p>
                             <form method="post">
                                 <div class="form-group">
