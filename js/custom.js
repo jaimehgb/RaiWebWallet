@@ -14,6 +14,7 @@ var lastAction = 0;
 var signOutInterval = 30;
 var _2fa_enabled = false;
 var _2fa_confirmed = false;
+var _2fa_required = 0;
 var _2fa_qr_url = "";
 var _2fa_key = "";
 var localPow = true;
@@ -933,15 +934,17 @@ $(document).ready(function(){
 		var code = $('#2fa_login_code').val();
 		
 		$('input').prop('disabled', true);
-		$.post('ajax.php', 'action=login&wallet_id='+wid+'&2fa='+code, function(data){
+		$.post('ajax.php', 'action=login&wallet_id='+wid+'&2fa='+code+"&2farequired="+_2fa_required, function(data){
 			data = JSON.parse(data);
 			
 			if(data.status == 'success')
 			{
 				if(data._2fa)
 				{
+					$('#2fa_login_code').val('');
 					$('#_2fa_input').fadeIn();
 					alertInfo("Enter google authenticator code.");
+					_2fa_required = 1;
 				}
 				else
 				{

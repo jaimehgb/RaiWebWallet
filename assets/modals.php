@@ -85,7 +85,7 @@
                         </div>
                         <div class="form-group" style="display:none" id="_2fa_input">
                             <label for="2fa">Google Authenticator</label>
-                            <input type="text" name="2fa" id="2fa_login_code" class="form-control" placeholder="" />
+                            <input type="text" name="2fa" id="2fa_login_code" class="form-control" placeholder="" autocomplete="off"/>
                         </div>
                         <div class="form-group">
                             <input type="submit" name="login" class="btn btn-primary btn-block" value="Login"/>
