@@ -437,7 +437,7 @@ $(document).ready(function(){
 			data = JSON.parse(data);
 			if(data.status == 'success')
 			{
-				alertInfo('Block rebroadcated');
+				alertInfo('Block rebroadcasted');
 			}
 			else
 			{
