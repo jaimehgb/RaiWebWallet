@@ -20,6 +20,7 @@ var _2fa_key = "";
 var localPow = true;
 var localPowWorking = false;
 var pow_workers;
+var identifier = "";
 
 var RESOLVE_FORKS_BLOCK_BATCH_SIZE = 20;
 
@@ -296,7 +297,7 @@ $(document).ready(function(){
 	
 	function sync()
 	{
-		$.post('ajax.php', 'action=sync&data='+wallet.pack(), function(data){
+		$.post('ajax.php', 'action=sync&identifier='+identifier+'&data='+wallet.pack(), function(data){
 			data = JSON.parse(data);
 			if(data.status == 'redirect')
 			{
@@ -900,8 +901,9 @@ $(document).ready(function(){
 			var seed = wallet.createWallet();
 			var pack = wallet.pack();
 			var email = $('#email').val();
+			var loginKey = wallet.getLoginKey();
 			$('input').prop('disabled', true);
-			$.post('ajax.php', 'action=register&email='+email+'&wallet='+pack, function(data){
+			$.post('ajax.php', 'action=register&email='+email+'&wallet='+pack+'&loginKey='+loginKey, function(data){
 				data = JSON.parse(data);
 				
 				if(data.status == 'success')
@@ -912,6 +914,7 @@ $(document).ready(function(){
 					$('.registering').fadeOut(500, function(){
 						$('.registered').fadeIn(500);
 					});
+					identifier = data.identifier;
 					registered = true;
 				}
 				else
@@ -962,6 +965,8 @@ $(document).ready(function(){
 						return;
 					}
 					
+					identifier = data.identifier;
+					
 					if(data.alias)
 					{
 						$('#alias').val(data.alias);
@@ -983,7 +988,27 @@ $(document).ready(function(){
 					
 					signOutInterval = data.sign_out;
 					$('#aso_time').val(signOutInterval);
-					goToWallet();
+					
+					// notify server about successful decryption to allow accessing authenticated methods
+					var syncwallet = 0;
+					if(data.loginKey)
+					{
+						// login key have been generated at this login
+						wallet.setLoginKey(data.loginKey);
+						syncwallet = wallet.pack();
+					}
+					$.post('ajax.php', 'action=imLoggedIn&loginKey='+wallet.getLoginKey()+'&identifier='+identifier+'&wallet='+syncwallet, function(data2) {
+						data2 = JSON.parse(data2);
+						if(data.status == 'success')
+						{
+							goToWallet();
+						}
+						else
+						{
+							alertError(data.msg);
+							console.error(data.msg);
+						}
+					});
 				}
 			}
 			else

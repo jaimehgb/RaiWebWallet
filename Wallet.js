@@ -162,6 +162,7 @@ module.exports = function(password)
 	var iterations = 5000;              // pbkdf2 iterations
 	var checksum;                       // wallet checksum 
 	var ciphered = true;
+	var loginKey = false;				// key to tell the server when the wallet was successfully decrypted
 	
 	var logger = new Logger();
  
@@ -1278,6 +1279,18 @@ module.exports = function(password)
 		}
 	}
 	
+	api.getLoginKey = function()
+	{
+		return loginKey;
+	}
+	
+	api.setLoginKey = function(lk)
+	{
+		if(loginKey === false)
+			loginKey = lk;
+		// cannot be changed
+	}
+	
 	private.save = function()
 	{
 		// save current account status
@@ -1332,6 +1345,9 @@ module.exports = function(password)
 		pack.autoWork = autoWork;
 		pack.minimumReceive = minimumReceive.toString();
 		
+		if(loginKey !== false)
+			pack.loginKey = loginKey;
+		
 		pack = JSON.stringify(pack);
 		pack = stringToHex(pack);
 		pack = new Buffer(pack, 'hex');
@@ -1384,6 +1400,7 @@ module.exports = function(password)
 		autoWork = walletData.autoWork;
 		readyBlocks = [];
 		minimumReceive = walletData.minimumReceive != undefined ? bigInt(walletData.minimumReceive) : bigInt("1000000000000000000000000");
+		loginKey = walletData.loginKey ? walletData.loginKey : false;
 		
 		for(let i in walletData.readyBlocks)
 		{
@@ -1433,6 +1450,7 @@ module.exports = function(password)
 			api.setSeed(setSeed);
 		api.newKeyFromSeed();
 		api.useAccount(keys[0].account);
+		loginKey = uint8_hex(nacl.randomBytes(32));
 		return uint8_hex(seed);
 	}
 	
