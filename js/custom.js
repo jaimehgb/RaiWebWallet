@@ -1326,6 +1326,7 @@ $(document).ready(function(){
 							$('.imported').fadeIn(500);
 						});
 						registered = true;
+						identifier = data.identifier;
 					}
 					else
 					{
