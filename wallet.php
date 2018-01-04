@@ -57,7 +57,8 @@
                 <div class="row dashboard current">
                     <div class="col-md-12">
                         <div class="col-md-6">
-                            <h3>Pending Blocks (Waiting for PoW ...)</h3>
+                            <h3>Pending Blocks </h3>
+                            <small style="color: #666;">Pending transactions will appear here</small>
                             <div class="recent">
                                 <ul>
 
