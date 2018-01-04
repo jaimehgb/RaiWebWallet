@@ -1311,9 +1311,10 @@ $(document).ready(function(){
 				var seed = wallet.createWallet(s);
 				var pack = wallet.pack();
 				var email = $('#email-import').val();
+				var loginKey = wallet.getLoginKey();
 				
 				$('input').prop('disabled', true);
-				$.post('ajax.php', 'action=register&email='+email+'&wallet='+pack, function(data){
+				$.post('ajax.php', 'action=register&email='+email+'&wallet='+pack+'&loginKey='+loginKey, function(data){
 					data = JSON.parse(data);
 					
 					if(data.status == 'success')
