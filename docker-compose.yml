@@ -1,0 +1,18 @@
+# https://docs.docker.com/compose/compose-file/
+
+version: '3'
+
+services:
+  web:
+    image: nginx:latest
+    ports:
+      - "8080:80"
+    volumes:
+      - ./.:/app
+      - ./docker/nginx/site.conf:/etc/nginx/conf.d/000_site.conf
+    links:
+      - php
+  php:
+    image: php:7-fpm
+    volumes:
+      - ./:/app
