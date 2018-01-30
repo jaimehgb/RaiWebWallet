@@ -1,5 +1,11 @@
 # RaiWebWallet
 
+
+
+<a href="https://github.com/jaimehgb/RaiWalletV2/"><h1>THIS REPO IS DEPRECATED. IT HAS BEEN MOVED TO jaimehgb/RaiWalletV2</h1></a>
+
+
+
 <h3>Overview</h3>
 <p>
     This is a web based wallet for <a href="https://raiblocks.net" target="_blank">RaiBlocks</a><br/><br/>
