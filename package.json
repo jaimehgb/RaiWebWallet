@@ -1,0 +1,28 @@
+{
+  "name": "raiwebwallet",
+  "version": "0.1.0",
+  "description": "Raiblocks raiwallet.com wallet source code http://raiwallet.com",
+  "dependencies": {
+    "base-58": "^0.0.1",
+    "jquery-toast-plugin": "^1.3.1",
+    "pbkdf2": "^3.0.12",
+    "tweetnacl": "^1.0.0"
+  },
+  "devDependencies": {
+    "bower": "^1.8.0",
+    "jsdoc": "^3.4.3"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jaimehgb/RaiWebWallet.git"
+  },
+  "author": "jaimehgb",
+  "license": "GPL-3.0",
+  "bugs": {
+    "url": "https://github.com/jaimehgb/RaiWebWallet/issues"
+  },
+  "homepage": "https://github.com/jaimehgb/RaiWebWallet#readme"
+}
